@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
 
-def get_scrapp_week(dt: datetime | None = None) -> tuple[int, int]:
-    """Returns (week_number, year) for Scrapp's Sunday-based weeks."""
+def get_edition_week(dt: datetime | None = None) -> tuple[int, int]:
+    """Returns (week_number, year) for Edition's Sunday-based weeks."""
     if dt is None:
         dt = datetime.now(timezone.utc)
     iso_year, iso_week, _ = dt.isocalendar()
@@ -28,7 +28,7 @@ def time_until_reveal() -> timedelta:
 
 def is_late_for_week(week_number: int, year: int) -> bool:
     """Check if publishing now would be late for the given week."""
-    current_week, current_year = get_scrapp_week()
+    current_week, current_year = get_edition_week()
     if current_year > year:
         return True
     if current_year == year and current_week > week_number:

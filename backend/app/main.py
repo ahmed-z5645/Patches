@@ -5,7 +5,7 @@ from app.routers import profiles, posts, blocks, upload, follows, feed
 
 settings = get_settings()
 
-app = FastAPI(title="Scrapp API", version="0.1.0")
+app = FastAPI(title="Edition API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,

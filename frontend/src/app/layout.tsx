@@ -20,7 +20,7 @@ const cabinetGrotesk = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Scrapp",
+  title: "Edition",
   description: "Your personal legacy engine",
 };
 

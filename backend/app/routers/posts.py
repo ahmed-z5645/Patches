@@ -3,7 +3,7 @@ from supabase import Client
 from app.deps import get_db, get_authenticated_user
 from app.models.posts import PostResponse, PostCreate, PostUpdate
 from app.services.posts import calculate_word_count
-from app.services.weeks import get_scrapp_week, is_late_for_week
+from app.services.weeks import get_edition_week, is_late_for_week
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/api/posts", tags=["posts"])
@@ -45,7 +45,7 @@ async def get_current_week_post(
     user_id: str = Depends(get_authenticated_user),
     db: Client = Depends(get_db),
 ):
-    week, year = get_scrapp_week()
+    week, year = get_edition_week()
     existing = (
         db.table("posts")
         .select("*")

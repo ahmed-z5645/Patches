@@ -1,5 +1,5 @@
 from supabase import Client
-from app.services.weeks import get_scrapp_week
+from app.services.weeks import get_edition_week
 
 
 def is_week_unlocked(db: Client, user_id: str, week: int, year: int) -> bool:
@@ -18,7 +18,7 @@ def is_week_unlocked(db: Client, user_id: str, week: int, year: int) -> bool:
 
 def is_past_week(week: int, year: int) -> bool:
     """Check if the given week is in the past."""
-    current_week, current_year = get_scrapp_week()
+    current_week, current_year = get_edition_week()
     if year < current_year:
         return True
     if year == current_year and week < current_week:

@@ -36,7 +36,7 @@ export default function LoginPage() {
   return (
     <>
       <div>
-        <h1 className="text-3xl font-bold">Sign in to Scrapp</h1>
+        <h1 className="text-3xl font-bold">Sign in to Edition</h1>
         <p className="mt-2 text-sm text-gray-500">
           Document your week. Unlock your feed.
         </p>

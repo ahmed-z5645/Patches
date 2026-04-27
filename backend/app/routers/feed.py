@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from supabase import Client
 from app.deps import get_db, get_authenticated_user
-from app.services.weeks import get_scrapp_week
+from app.services.weeks import get_edition_week
 from app.services.feed import is_week_unlocked, is_past_week, get_feed_posts
 
 router = APIRouter(prefix="/api/feed", tags=["feed"])
@@ -15,7 +15,7 @@ async def get_feed(
     db: Client = Depends(get_db),
 ):
     if week is None or year is None:
-        week, year = get_scrapp_week()
+        week, year = get_edition_week()
 
     if is_past_week(week, year):
         posts = get_feed_posts(db, user_id, week, year)
@@ -60,7 +60,7 @@ async def get_archive(
     db: Client = Depends(get_db),
 ):
     """Get all past-week published posts from followed users, grouped by week."""
-    current_week, current_year = get_scrapp_week()
+    current_week, current_year = get_edition_week()
 
     following = (
         db.table("follows")

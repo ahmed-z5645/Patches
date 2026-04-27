@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Scrapp is a personal documentation platform with "Bento" grid aesthetics. Users publish weekly posts containing rich artifact tiles. The core mechanic: you must publish a valid post (title + 100 words minimum) each week to unlock your followers' posts for that week. Posts are revealed every Sunday at midnight.
+Edition is a personal documentation platform with "Bento" grid aesthetics. Users publish weekly posts containing rich artifact tiles. The core mechanic: you must publish a valid post (title + 100 words minimum) each week to unlock your followers' posts for that week. Posts are revealed every Sunday at midnight.
 
 ## Stack
 

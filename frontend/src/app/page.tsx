@@ -14,7 +14,7 @@ export default async function LandingPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-4">
-      <h1 className="text-[64px] font-normal leading-tight">Scrapp</h1>
+      <h1 className="text-[64px] font-normal leading-tight">Edition</h1>
       <p className="mt-4 max-w-md text-center text-gray-500">
         Document your week. Unlock your feed. Build your legacy.
       </p>
