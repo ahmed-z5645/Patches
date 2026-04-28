@@ -54,6 +54,55 @@ async def get_feed(
     return {"locked": False, "posts": posts, "week": week, "year": year}
 
 
+@router.get("/older")
+async def get_older_posts(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(6, ge=1, le=20),
+    user_id: str = Depends(get_authenticated_user),
+    db: Client = Depends(get_db),
+):
+    current_week, current_year = get_edition_week()
+
+    following = (
+        db.table("follows")
+        .select("following_id")
+        .eq("follower_id", user_id)
+        .execute()
+    )
+    following_ids = [row["following_id"] for row in following.data or []]
+    if not following_ids:
+        return {"posts": [], "has_more": False}
+
+    all_posts = (
+        db.table("posts")
+        .select("*, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
+        .eq("is_published", True)
+        .in_("user_id", following_ids)
+        .order("published_at", desc=True)
+        .execute()
+    )
+
+    past_posts = [
+        p for p in (all_posts.data or [])
+        if p["year"] < current_year
+        or (p["year"] == current_year and p["week_number"] < current_week)
+    ]
+
+    page = past_posts[offset : offset + limit]
+
+    for post in page:
+        blocks = (
+            db.table("blocks")
+            .select("*")
+            .eq("post_id", post["id"])
+            .order("sort_order")
+            .execute()
+        )
+        post["blocks"] = blocks.data or []
+
+    return {"posts": page, "has_more": offset + limit < len(past_posts)}
+
+
 @router.get("/archive")
 async def get_archive(
     user_id: str = Depends(get_authenticated_user),

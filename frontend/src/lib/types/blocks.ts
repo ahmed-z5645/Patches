@@ -3,6 +3,7 @@ import type { DesktopLayout, MobileLayout } from "./grid";
 export type BlockType =
   | "markdown"
   | "image"
+  | "quote"
   | "spotify"
   | "strava"
   | "map"
@@ -53,6 +54,11 @@ export interface CodeBlock extends BaseBlock {
   content: { code: string; language: string };
 }
 
+export interface QuoteBlock extends BaseBlock {
+  type: "quote";
+  content: { text: string; attribution?: string };
+}
+
 export interface WeatherBlock extends BaseBlock {
   type: "weather";
   content: { city: string };
@@ -61,6 +67,7 @@ export interface WeatherBlock extends BaseBlock {
 export type Block =
   | MarkdownBlock
   | ImageBlock
+  | QuoteBlock
   | SpotifyBlock
   | StravaBlock
   | MapBlock

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
-import { FeedCard } from "@/components/feed/FeedCard";
+import { PostCard } from "@/components/feed/PostCard";
 import { FollowButton } from "@/components/social/FollowButton";
 
 interface Profile {
@@ -142,10 +142,9 @@ export function ProfileClient({ profile }: { profile: Profile }) {
           {isOwnProfile ? "You haven't published anything yet." : "No posts yet."}
         </p>
       ) : (
-        <div className="space-y-10">
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-          {posts.map((post: any) => (
-            <FeedCard key={post.id} post={post} />
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          {posts.map((post) => (
+            <PostCard key={post.id} post={post} />
           ))}
         </div>
       )}

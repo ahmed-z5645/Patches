@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   DndContext,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   useDraggable,
@@ -13,14 +14,16 @@ import {
 import type { Block, Post } from "@/lib/types/blocks";
 import type { MobileLayout } from "@/lib/types/grid";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
+import { PostCard } from "@/components/feed/PostCard";
 
 interface PrepublishScreenProps {
   post: Post;
   blocks: Block[];
   username: string;
-  onPublish: (coverColor: string, mobileLayouts: Record<string, MobileLayout>, tags: string[]) => void;
+  onPublish: (coverColor: string, tags: string[]) => void;
   onSaveDraft: () => void;
   onCancel: () => void;
+  onMobileLayoutChange: (blockId: string, changes: Partial<MobileLayout>) => void;
 }
 
 const COVER_COLORS = [
@@ -36,62 +39,49 @@ const COVER_COLORS = [
   "#659dbd",
 ];
 
-function compressToMobile(blocks: Block[]): Record<string, MobileLayout> {
-  const topLevel = blocks
-    .filter((b) => !b.parent_block_id)
-    .sort((a, b) => {
-      const ar = a.grid_layout_desktop.rowStart;
-      const br = b.grid_layout_desktop.rowStart;
-      if (ar !== br) return ar - br;
-      return a.grid_layout_desktop.colStart - b.grid_layout_desktop.colStart;
-    });
-
-  const layouts: Record<string, MobileLayout> = {};
-  let row = 1;
-  let col = 1;
-
-  for (const block of topLevel) {
-    const desktopSpan = block.grid_layout_desktop.colSpan;
-    const colSpan = desktopSpan >= 2 ? 2 : 1;
-    const rowSpan = colSpan * 2;
-
-    if (colSpan === 2) {
-      if (col !== 1) {
-        row += 2;
-        col = 1;
-      }
-      layouts[block.id] = { colStart: 1, colSpan: 2, rowStart: row, rowSpan };
-      row += rowSpan;
-      col = 1;
-    } else {
-      layouts[block.id] = { colStart: col, colSpan: 1, rowStart: row, rowSpan };
-      if (col === 1) {
-        col = 2;
-      } else {
-        col = 1;
-        row += rowSpan;
-      }
-    }
-  }
-
-  return layouts;
-}
-
-function MobileDraggableTile({
+function PreviewDraggableTile({
   id,
   layout,
   gridMeta,
   onResize,
   children,
+  autoHeight,
 }: {
   id: string;
   layout: MobileLayout;
   gridMeta: { colWidth: number; rowHeight: number };
   onResize: (id: string, changes: Partial<MobileLayout>) => void;
   children: React.ReactNode;
+  autoHeight?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id });
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!autoHeight) return;
+    const el = contentRef.current;
+    if (!el) return;
+
+    function measure() {
+      const grid = el!.closest("[data-preview-grid]") as HTMLElement | null;
+      if (!grid) return;
+      const rowHeight = parseFloat(grid.style.gridAutoRows);
+      if (!rowHeight || isNaN(rowHeight)) return;
+      const gap = 12;
+      const dragHandleHeight = 16;
+      const scaledContentHeight = el!.scrollHeight * 0.7;
+      const needed = Math.ceil((scaledContentHeight + dragHandleHeight + gap) / (rowHeight + gap));
+      if (needed !== layout.rowSpan) {
+        onResize(id, { rowSpan: needed });
+      }
+    }
+
+    measure();
+    const obs = new ResizeObserver(measure);
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [autoHeight, id, layout.rowSpan, onResize]);
 
   const handleResizeCorner = useCallback(
     (e: React.PointerEvent) => {
@@ -103,7 +93,7 @@ function MobileDraggableTile({
       const startY = e.clientY;
       const startColSpan = layout.colSpan;
       const startRowSpan = layout.rowSpan;
-      const gap = 6;
+      const gap = 12;
 
       function onMove(ev: PointerEvent) {
         const dx = ev.clientX - startX;
@@ -140,11 +130,12 @@ function MobileDraggableTile({
     <div
       ref={setNodeRef}
       style={style}
-      className="group/tile relative overflow-hidden rounded-[8px] border border-primary/50 bg-bg"
+      className={`group/tile relative ${autoHeight ? "" : "overflow-hidden"} rounded-[8px] border border-primary/50 bg-bg`}
     >
       <div
         {...listeners}
         {...attributes}
+        style={{ touchAction: "none" }}
         className="flex h-4 cursor-grab items-center justify-center border-b border-primary/20 active:cursor-grabbing"
       >
         <div className="flex gap-px">
@@ -153,12 +144,12 @@ function MobileDraggableTile({
           <span className="size-[3px] rounded-full bg-text/20" />
         </div>
       </div>
-      <div className="h-[calc(100%-16px)] overflow-hidden">{children}</div>
+      <div ref={contentRef} className={autoHeight ? "" : "h-[calc(100%-16px)] overflow-hidden"}>{children}</div>
       <div
         onPointerDown={handleResizeCorner}
-        className="absolute bottom-0.5 right-0.5 flex size-3 cursor-nwse-resize items-center justify-center opacity-0 transition-opacity group-hover/tile:opacity-100"
+        className="absolute bottom-0.5 right-0.5 flex size-4 cursor-nwse-resize items-center justify-center"
       >
-        <svg viewBox="0 0 10 10" className="size-2 text-text/40">
+        <svg viewBox="0 0 10 10" className="size-2.5 text-text/30">
           <path d="M9 1v8H1" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
       </div>
@@ -169,27 +160,25 @@ function MobileDraggableTile({
 function MobilePhonePreview({
   title,
   blocks,
-  mobileLayouts,
   onLayoutChange,
 }: {
   title: string;
   blocks: Block[];
-  mobileLayouts: Record<string, MobileLayout>;
   onLayoutChange: (id: string, changes: Partial<MobileLayout>) => void;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
   const [gridMeta, setGridMeta] = useState({ colWidth: 0, rowHeight: 0 });
   const topLevel = blocks.filter((b) => !b.parent_block_id);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  );
+  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 5 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
+  const sensors = useSensors(touchSensor, pointerSensor);
 
   useEffect(() => {
     function update() {
       if (!gridRef.current) return;
       const w = gridRef.current.clientWidth;
-      const gap = 6;
+      const gap = 12;
       const colWidth = (w - gap) / 2;
       setGridMeta({ colWidth, rowHeight: colWidth / 2 });
     }
@@ -203,10 +192,11 @@ function MobilePhonePreview({
     const { active, delta } = event;
     if (!gridMeta.colWidth || !gridMeta.rowHeight) return;
     const blockId = active.id as string;
-    const layout = mobileLayouts[blockId];
-    if (!layout) return;
+    const block = topLevel.find((b) => b.id === blockId);
+    if (!block) return;
+    const layout = block.grid_layout_mobile;
 
-    const gap = 6;
+    const gap = 12;
     const colDelta = Math.round(delta.x / (gridMeta.colWidth + gap));
     const rowDelta = Math.round(delta.y / (gridMeta.rowHeight + gap));
     if (colDelta === 0 && rowDelta === 0) return;
@@ -242,30 +232,30 @@ function MobilePhonePreview({
           <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
             <div
               ref={gridRef}
+              data-preview-grid
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(2, 1fr)",
                 gridAutoRows: gridMeta.rowHeight || "auto",
-                gap: 6,
+                gap: 12,
               }}
             >
-              {topLevel.map((block) => {
-                const layout = mobileLayouts[block.id];
-                if (!layout) return null;
-                return (
-                  <MobileDraggableTile
-                    key={block.id}
-                    id={block.id}
-                    layout={layout}
-                    gridMeta={gridMeta}
-                    onResize={onLayoutChange}
-                  >
-                    <div className="pointer-events-none h-full scale-[0.7] origin-top-left">
+              {topLevel.map((block) => (
+                <PreviewDraggableTile
+                  key={block.id}
+                  id={block.id}
+                  layout={block.grid_layout_mobile}
+                  gridMeta={gridMeta}
+                  onResize={onLayoutChange}
+                  autoHeight={block.type === "markdown"}
+                >
+                  <div className="pointer-events-none overflow-hidden">
+                    <div style={{ width: "142.86%", transform: "scale(0.7)", transformOrigin: "top left" }}>
                       <BlockRenderer block={block} />
                     </div>
-                  </MobileDraggableTile>
-                );
-              })}
+                  </div>
+                </PreviewDraggableTile>
+              ))}
             </div>
           </DndContext>
         </div>
@@ -296,23 +286,16 @@ export function PrepublishScreen({
   onPublish,
   onSaveDraft,
   onCancel,
+  onMobileLayoutChange,
 }: PrepublishScreenProps) {
   const [visible, setVisible] = useState(false);
   const [coverColor, setCoverColor] = useState(post.cover_color || COVER_COLORS[0]);
-  const [mobileLayouts, setMobileLayouts] = useState(() => compressToMobile(blocks));
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
 
   useEffect(() => {
     setVisible(true);
   }, []);
-
-  function handleLayoutChange(blockId: string, changes: Partial<MobileLayout>) {
-    setMobileLayouts((prev) => ({
-      ...prev,
-      [blockId]: { ...prev[blockId], ...changes },
-    }));
-  }
 
   function handleCancel() {
     setVisible(false);
@@ -321,7 +304,7 @@ export function PrepublishScreen({
 
   function handlePublish() {
     setVisible(false);
-    setTimeout(() => onPublish(coverColor, mobileLayouts, tags), 300);
+    setTimeout(() => onPublish(coverColor, tags), 300);
   }
 
   function handleAddTag() {
@@ -424,22 +407,18 @@ export function PrepublishScreen({
                       Choose a cover:
                     </h2>
 
-                    <div
-                      className="mb-4 flex flex-col justify-end rounded-[15px] p-5 transition-colors"
-                      style={{ backgroundColor: coverColor, height: 160 }}
-                    >
-                      <h3
-                        className="text-lg font-bold leading-tight"
-                        style={{ color: coverColor === "#223843" ? "#eff1f3" : "#223843" }}
-                      >
-                        {post.title || "TITLE TITLE TITLEY TITLE!"}
-                      </h3>
-                      <p
-                        className="mt-1 text-xs"
-                        style={{ color: coverColor === "#223843" ? "#eff1f3" : "#223843", opacity: 0.6 }}
-                      >
-                        {username && `@${username}`}{username ? ", " : ""}{new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-                      </p>
+                    <div className="mb-4 pointer-events-none">
+                      <PostCard
+                        compact
+                        post={{
+                          ...post,
+                          cover_color: coverColor,
+                          blocks: blocks,
+                          profiles: username
+                            ? { username, display_name: null, avatar_url: null }
+                            : undefined,
+                        }}
+                      />
                     </div>
 
                     <div className="mb-10 flex justify-center gap-3">
@@ -477,8 +456,7 @@ export function PrepublishScreen({
                     <MobilePhonePreview
                       title={post.title || ""}
                       blocks={blocks}
-                      mobileLayouts={mobileLayouts}
-                      onLayoutChange={handleLayoutChange}
+                      onLayoutChange={onMobileLayoutChange}
                     />
                   </div>
                 </div>

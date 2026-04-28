@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 from app.deps import get_db, get_authenticated_user
 from app.models.blocks import BlockResponse, BlockCreate, BlockUpdate, BlockLayoutUpdate
+from app.routers.upload import delete_image_by_url
 
 router = APIRouter(tags=["blocks"])
 
@@ -74,7 +75,16 @@ async def update_block(
     user_id: str = Depends(get_authenticated_user),
     db: Client = Depends(get_db),
 ):
-    verify_block_ownership(db, block_id, user_id)
+    block_data = verify_block_ownership(db, block_id, user_id)
+
+    if (
+        block_data.get("type") == "image"
+        and body.content
+        and body.content.get("url") != (block_data.get("content") or {}).get("url")
+    ):
+        old_url = (block_data.get("content") or {}).get("url", "")
+        if old_url:
+            delete_image_by_url(db, old_url)
 
     update_data = body.model_dump(exclude_none=True)
     if not update_data:
@@ -111,6 +121,12 @@ async def delete_block(
     user_id: str = Depends(get_authenticated_user),
     db: Client = Depends(get_db),
 ):
-    verify_block_ownership(db, block_id, user_id)
+    block_data = verify_block_ownership(db, block_id, user_id)
+
+    if block_data.get("type") == "image":
+        url = (block_data.get("content") or {}).get("url", "")
+        if url:
+            delete_image_by_url(db, url)
+
     db.table("blocks").delete().eq("id", block_id).execute()
     return {"ok": True}

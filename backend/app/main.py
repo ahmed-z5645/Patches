@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
-from app.routers import profiles, posts, blocks, upload, follows, feed
+from app.routers import profiles, posts, blocks, upload, follows, feed, search
 
 settings = get_settings()
 
@@ -25,6 +25,7 @@ app.include_router(blocks.router)
 app.include_router(upload.router)
 app.include_router(follows.router)
 app.include_router(feed.router)
+app.include_router(search.router)
 
 
 @app.get("/api/health")

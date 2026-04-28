@@ -4,23 +4,73 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
   DndContext,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
 import type { Block, BlockType, Post } from "@/lib/types/blocks";
 import type { DesktopLayout, MobileLayout } from "@/lib/types/grid";
-import { BentoGrid } from "@/components/bento/BentoGrid";
+import { BentoGrid, BentoGridMobile } from "@/components/bento/BentoGrid";
 import { DraggableTile } from "@/components/bento/DraggableTile";
+import { MobileDraggableTile } from "@/components/bento/MobileDraggableTile";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { PrepublishScreen } from "./PrepublishScreen";
 import { TitleInput } from "./TitleInput";
 import { WordCounter } from "./WordCounter";
-import { EditorToolbar } from "./EditorToolbar";
+import { GhostBlockOverlay } from "./GhostBlockOverlay";
+import { MobileGhostBlockOverlay } from "./MobileGhostBlockOverlay";
 import { PublishButton } from "./PublishButton";
 import { countWords } from "@/lib/utils/wordcount";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
+
+const DEFAULT_MOBILE_LAYOUTS: Record<string, MobileLayout> = {
+  markdown: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+  image: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+  quote: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
+  code: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 4 },
+  spotify: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+  strava: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+  map: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+  weather: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+};
+
+function isMobileCellOccupied(blocks: Block[], col: number, row: number): boolean {
+  for (const b of blocks) {
+    if (b.parent_block_id) continue;
+    const l = b.grid_layout_mobile;
+    if (
+      col >= l.colStart &&
+      col < l.colStart + l.colSpan &&
+      row >= l.rowStart &&
+      row < l.rowStart + l.rowSpan
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function findNextMobilePosition(blocks: Block[]): MobileLayout {
+  const topLevel = blocks.filter((b) => !b.parent_block_id);
+  if (topLevel.length === 0) {
+    return { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 };
+  }
+  let maxRow = 0;
+  for (const b of topLevel) {
+    const end = b.grid_layout_mobile.rowStart + b.grid_layout_mobile.rowSpan;
+    if (end > maxRow) maxRow = end;
+  }
+  for (let r = 1; r <= maxRow; r++) {
+    for (let c = 1; c <= 2; c++) {
+      if (!isMobileCellOccupied(topLevel, c, r)) {
+        return { colStart: c, colSpan: 1, rowStart: r, rowSpan: 2 };
+      }
+    }
+  }
+  return { colStart: 1, colSpan: 1, rowStart: maxRow, rowSpan: 2 };
+}
 
 interface EditorCanvasProps {
   post: Post;
@@ -28,8 +78,9 @@ interface EditorCanvasProps {
 }
 
 const DEFAULT_LAYOUTS: Record<string, DesktopLayout> = {
-  markdown: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 4 },
+  markdown: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
   image: { colStart: 3, colSpan: 1, rowStart: 1, rowSpan: 2 },
+  quote: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
   code: { colStart: 3, colSpan: 2, rowStart: 1, rowSpan: 4 },
   spotify: { colStart: 4, colSpan: 1, rowStart: 1, rowSpan: 2 },
   strava: { colStart: 4, colSpan: 1, rowStart: 1, rowSpan: 2 },
@@ -56,17 +107,28 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showMobileReview, setShowMobileReview] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [username, setUsername] = useState("");
   const dirtyBlocksRef = useRef<Set<string>>(new Set());
   const dirtyLayoutsRef = useRef<Set<string>>(new Set());
 
   const gridRef = useRef<HTMLDivElement>(null);
+  const mobileGridRef = useRef<HTMLDivElement>(null);
   const [gridMeta, setGridMeta] = useState({ colWidth: 0, rowHeight: 0 });
+  const [mobileGridMeta, setMobileGridMeta] = useState({ colWidth: 0, rowHeight: 0 });
 
   useEffect(() => {
     createClient().auth.getUser().then(({ data }) => {
       setUsername(data.user?.user_metadata?.username || "");
     });
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
   }, []);
 
   useEffect(() => {
@@ -81,11 +143,25 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
     const obs = new ResizeObserver(update);
     if (gridRef.current) obs.observe(gridRef.current);
     return () => obs.disconnect();
-  }, []);
+  }, [isMobile]);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
-  );
+  useEffect(() => {
+    function update() {
+      if (!mobileGridRef.current) return;
+      const w = mobileGridRef.current.clientWidth;
+      const gap = 12;
+      const colWidth = (w - gap) / 2;
+      setMobileGridMeta({ colWidth, rowHeight: colWidth / 2 });
+    }
+    update();
+    const obs = new ResizeObserver(update);
+    if (mobileGridRef.current) obs.observe(mobileGridRef.current);
+    return () => obs.disconnect();
+  }, [isMobile]);
+
+  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 8 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
+  const sensors = useSensors(touchSensor, pointerSensor);
 
   const wordCount = useMemo(() => {
     return blocks
@@ -121,7 +197,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
         const block = blocks.find((b) => b.id === blockId);
         if (block) {
           promises.push(
-            api.put(`/api/blocks/${blockId}`, { content: block.content })
+            api.put(`/api/blocks/${blockId}`, { content: block.content, z_index: block.z_index })
           );
         }
       }
@@ -189,16 +265,70 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
     const newColStart = Math.max(1, Math.min(5 - layout.colSpan, layout.colStart + colDelta));
     const newRowStart = Math.max(1, layout.rowStart + rowDelta);
 
-    setBlocks((prev) =>
-      prev.map((b) =>
+    setBlocks((prev) => {
+      const maxZ = Math.max(0, ...prev.map((b) => b.z_index || 0));
+      return prev.map((b) =>
         b.id === blockId
           ? {
               ...b,
+              z_index: maxZ + 1,
               grid_layout_desktop: {
                 ...b.grid_layout_desktop,
                 colStart: newColStart,
                 rowStart: newRowStart,
               },
+            }
+          : b
+      );
+    });
+    dirtyBlocksRef.current.add(blockId);
+    dirtyLayoutsRef.current.add(blockId);
+    setHasUnsavedChanges(true);
+  }
+
+  function handleMobileDragEnd(event: DragEndEvent) {
+    const { active, delta } = event;
+    if (!mobileGridMeta.colWidth || !mobileGridMeta.rowHeight) return;
+
+    const blockId = active.id as string;
+    const block = blocks.find((b) => b.id === blockId);
+    if (!block) return;
+
+    const gap = 12;
+    const colDelta = Math.round(delta.x / (mobileGridMeta.colWidth + gap));
+    const rowDelta = Math.round(delta.y / (mobileGridMeta.rowHeight + gap));
+
+    if (colDelta === 0 && rowDelta === 0) return;
+
+    const layout = block.grid_layout_mobile;
+    const newColStart = Math.max(1, Math.min(3 - layout.colSpan, layout.colStart + colDelta));
+    const newRowStart = Math.max(1, layout.rowStart + rowDelta);
+
+    setBlocks((prev) =>
+      prev.map((b) =>
+        b.id === blockId
+          ? {
+              ...b,
+              grid_layout_mobile: {
+                ...b.grid_layout_mobile,
+                colStart: newColStart,
+                rowStart: newRowStart,
+              },
+            }
+          : b
+      )
+    );
+    dirtyLayoutsRef.current.add(blockId);
+    setHasUnsavedChanges(true);
+  }
+
+  function handleMobileResize(blockId: string, changes: Partial<MobileLayout>) {
+    setBlocks((prev) =>
+      prev.map((b) =>
+        b.id === blockId
+          ? {
+              ...b,
+              grid_layout_mobile: { ...b.grid_layout_mobile, ...changes },
             }
           : b
       )
@@ -222,18 +352,33 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
     setHasUnsavedChanges(true);
   }
 
-  async function handleAddBlock(type: BlockType) {
+  async function handleAddBlock(type: BlockType, col?: number, row?: number) {
     const defaults = DEFAULT_LAYOUTS[type] || {
       colStart: 1,
       colSpan: 1,
       rowStart: 1,
       rowSpan: 2,
     };
-    const position = findNextPosition(blocks);
+    const position = col != null && row != null
+      ? { colStart: col, rowStart: row }
+      : findNextPosition(blocks);
     const gridLayout = {
       ...defaults,
       colStart: position.colStart,
       rowStart: position.rowStart,
+    };
+
+    const mobileDefaults = DEFAULT_MOBILE_LAYOUTS[type] || {
+      colStart: 1,
+      colSpan: 1,
+      rowStart: 1,
+      rowSpan: 2,
+    };
+    const mobilePosition = findNextMobilePosition(blocks);
+    const mobileGridLayout = {
+      ...mobileDefaults,
+      colStart: mobilePosition.colStart,
+      rowStart: mobilePosition.rowStart,
     };
 
     try {
@@ -242,16 +387,62 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
         content:
           type === "markdown"
             ? { markdown: "" }
-            : type === "code"
-              ? { code: "", language: "javascript" }
-              : {},
+            : type === "quote"
+              ? { text: "" }
+              : type === "code"
+                ? { code: "", language: "javascript" }
+                : {},
         grid_layout_desktop: gridLayout,
-        grid_layout_mobile: {
-          colStart: 1,
-          colSpan: type === "markdown" ? 2 : 1,
-          rowStart: 1,
-          rowSpan: type === "markdown" ? 4 : 2,
-        },
+        grid_layout_mobile: mobileGridLayout,
+      });
+      setBlocks((prev) => [...prev, newBlock]);
+    } catch (e) {
+      console.error("Failed to add block:", e);
+    }
+  }
+
+  async function handleMobileAddBlock(type: BlockType, col?: number, row?: number) {
+    const mobileDefaults = DEFAULT_MOBILE_LAYOUTS[type] || {
+      colStart: 1,
+      colSpan: 1,
+      rowStart: 1,
+      rowSpan: 2,
+    };
+    const position = col != null && row != null
+      ? { colStart: col, rowStart: row }
+      : findNextMobilePosition(blocks);
+    const mobileGridLayout = {
+      ...mobileDefaults,
+      colStart: position.colStart,
+      rowStart: position.rowStart,
+    };
+
+    const desktopDefaults = DEFAULT_LAYOUTS[type] || {
+      colStart: 1,
+      colSpan: 1,
+      rowStart: 1,
+      rowSpan: 2,
+    };
+    const desktopPosition = findNextPosition(blocks);
+    const desktopGridLayout = {
+      ...desktopDefaults,
+      colStart: desktopPosition.colStart,
+      rowStart: desktopPosition.rowStart,
+    };
+
+    try {
+      const newBlock = await api.post<Block>(`/api/posts/${post.id}/blocks`, {
+        type,
+        content:
+          type === "markdown"
+            ? { markdown: "" }
+            : type === "quote"
+              ? { text: "" }
+              : type === "code"
+                ? { code: "", language: "javascript" }
+                : {},
+        grid_layout_desktop: desktopGridLayout,
+        grid_layout_mobile: mobileGridLayout,
       });
       setBlocks((prev) => [...prev, newBlock]);
     } catch (e) {
@@ -268,7 +459,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
     setShowMobileReview(true);
   }
 
-  async function handlePrepublish(coverColor: string, mobileLayouts: Record<string, MobileLayout>, tags: string[]) {
+  async function handlePrepublish(coverColor: string, tags: string[]) {
     setIsPublishing(true);
     setShowMobileReview(false);
     try {
@@ -277,14 +468,8 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
       for (const blockId of dirtyBlocksRef.current) {
         const block = blocks.find((b) => b.id === blockId);
         if (block) {
-          await api.put(`/api/blocks/${blockId}`, { content: block.content });
+          await api.put(`/api/blocks/${blockId}`, { content: block.content, z_index: block.z_index });
         }
-      }
-
-      for (const [blockId, layout] of Object.entries(mobileLayouts)) {
-        await api.put(`/api/blocks/${blockId}/layout`, {
-          grid_layout_mobile: layout,
-        });
       }
 
       for (const blockId of dirtyLayoutsRef.current) {
@@ -292,6 +477,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
         if (block) {
           await api.put(`/api/blocks/${blockId}/layout`, {
             grid_layout_desktop: block.grid_layout_desktop,
+            grid_layout_mobile: block.grid_layout_mobile,
           });
         }
       }
@@ -320,8 +506,88 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
     }
   }
 
+  const prepublishModal = showMobileReview && (
+    <PrepublishScreen
+      post={{ ...post, title }}
+      blocks={blocks}
+      username={username}
+      onPublish={handlePrepublish}
+      onSaveDraft={handleSaveDraft}
+      onCancel={() => setShowMobileReview(false)}
+      onMobileLayoutChange={handleMobileResize}
+    />
+  );
+
+  if (isMobile) {
+    return (
+      <div className="space-y-4 pb-24">
+        <div className="flex items-center justify-between">
+          <WordCounter count={wordCount} />
+          <div className="flex items-center gap-2">
+            {hasUnsavedChanges && (
+              <button
+                onClick={saveAll}
+                disabled={isSaving}
+                className="rounded-[10px] border border-primary px-3 py-1.5 text-xs text-text/60 active:bg-primary/30 disabled:opacity-40"
+              >
+                {isSaving ? "Saving..." : "Save"}
+              </button>
+            )}
+            <PublishButton
+              canPublish={canPublish}
+              isPublishing={isPublishing}
+              onPublish={handlePublishClick}
+            />
+          </div>
+        </div>
+
+        <TitleInput value={title} onChange={handleTitleChange} />
+
+        <p className="text-sm text-text/40">
+          {post.week_number && `Week ${post.week_number}, ${post.year}`}
+        </p>
+
+        <DndContext sensors={sensors} onDragEnd={handleMobileDragEnd}>
+          <BentoGridMobile ref={mobileGridRef} minExtraRows={2} blocks={topLevelBlocks}>
+            {topLevelBlocks.map((block) => (
+              <MobileDraggableTile
+                key={block.id}
+                id={block.id}
+                mobileLayout={block.grid_layout_mobile}
+                gridMeta={mobileGridMeta}
+                onResize={handleMobileResize}
+                className="group/tile relative border border-primary"
+                autoHeight={block.type === "markdown"}
+              >
+                <button
+                  onClick={() => handleDeleteBlock(block.id)}
+                  className="absolute right-2 top-2 z-10 flex size-7 items-center justify-center rounded-full bg-text/10 text-xs active:bg-accent active:text-white"
+                >
+                  ×
+                </button>
+                <BlockRenderer
+                  block={block}
+                  childBlocks={childBlocksMap[block.id]}
+                  isEditing={true}
+                  onUpdate={handleUpdateBlock}
+                />
+              </MobileDraggableTile>
+            ))}
+            <MobileGhostBlockOverlay
+              gridRef={mobileGridRef}
+              blocks={blocks}
+              onAddBlock={handleMobileAddBlock}
+            />
+          </BentoGridMobile>
+        </DndContext>
+
+        {prepublishModal}
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <WordCounter count={wordCount} />
@@ -345,10 +611,8 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
         {post.week_number && `Week ${post.week_number}, ${post.year}`}
       </p>
 
-      <EditorToolbar onAddBlock={handleAddBlock} />
-
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        <BentoGrid ref={gridRef}>
+        <BentoGrid ref={gridRef} minExtraRows={2} blocks={topLevelBlocks}>
           {topLevelBlocks.map((block) => (
             <DraggableTile
               key={block.id}
@@ -358,6 +622,8 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
               gridMeta={gridMeta}
               onResize={handleResize}
               className="group relative border border-primary"
+              autoHeight={block.type === "markdown"}
+              zIndex={block.z_index}
             >
               <button
                 onClick={() => handleDeleteBlock(block.id)}
@@ -373,19 +639,15 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
               />
             </DraggableTile>
           ))}
+          <GhostBlockOverlay
+            gridRef={gridRef}
+            blocks={blocks}
+            onAddBlock={handleAddBlock}
+          />
         </BentoGrid>
       </DndContext>
 
-      {showMobileReview && (
-        <PrepublishScreen
-          post={{ ...post, title }}
-          blocks={blocks}
-          username={username}
-          onPublish={handlePrepublish}
-          onSaveDraft={handleSaveDraft}
-          onCancel={() => setShowMobileReview(false)}
-        />
-      )}
+      {prepublishModal}
     </div>
   );
 }

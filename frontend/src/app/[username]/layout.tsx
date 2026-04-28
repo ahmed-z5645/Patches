@@ -18,7 +18,7 @@ export default function PublicProfileLayout({
           </div>
           <CountdownPill />
         </header>
-        <main className="px-6 py-6 pb-[100px] md:px-10 md:pb-6">
+        <main className="mx-auto max-w-7xl px-6 py-6 pb-[100px] md:px-10 md:pb-6">
           {children}
         </main>
       </div>

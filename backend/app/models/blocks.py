@@ -28,6 +28,7 @@ class BlockCreate(BaseModel):
 
 class BlockUpdate(BaseModel):
     content: dict[str, Any] | None = None
+    z_index: int | None = None
 
 
 class BlockLayoutUpdate(BaseModel):

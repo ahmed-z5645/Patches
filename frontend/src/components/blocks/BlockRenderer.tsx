@@ -3,6 +3,7 @@
 import type { Block } from "@/lib/types/blocks";
 import { MarkdownBlock } from "./MarkdownBlock";
 import { ImageBlock } from "./ImageBlock";
+import { QuoteBlock } from "./QuoteBlock";
 import { CodeBlock } from "./CodeBlock";
 import { EmbedBlock } from "./EmbedBlock";
 
@@ -36,6 +37,14 @@ export function BlockRenderer({
     case "image":
       return (
         <ImageBlock
+          block={block}
+          isEditing={isEditing}
+          onUpdate={handleUpdate}
+        />
+      );
+    case "quote":
+      return (
+        <QuoteBlock
           block={block}
           isEditing={isEditing}
           onUpdate={handleUpdate}

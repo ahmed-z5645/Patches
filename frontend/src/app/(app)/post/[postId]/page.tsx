@@ -59,7 +59,7 @@ export default function PostPage() {
 
   if (error || !post) {
     return (
-      <div className="space-y-4 py-20 text-center">
+      <div className="mx-auto max-w-5xl space-y-4 py-20 text-center">
         <h1 className="font-[family-name:var(--font-cabinet)] text-2xl font-bold">
           Post not found
         </h1>
@@ -71,7 +71,7 @@ export default function PostPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <Link
         href="/feed"
         className="inline-block text-sm text-text/40 hover:text-text/60"
@@ -102,6 +102,7 @@ export default function PostPage() {
             desktopLayout={block.grid_layout_desktop}
             mobileLayout={block.grid_layout_mobile}
             className="border border-primary"
+            autoHeight={block.type === "markdown"}
           >
             <BlockRenderer
               block={block}

@@ -76,7 +76,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <h1 className="font-[family-name:var(--font-cabinet)] text-[64px] font-bold leading-tight">
         Settings
       </h1>
