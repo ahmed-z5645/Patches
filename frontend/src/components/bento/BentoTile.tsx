@@ -55,7 +55,7 @@ export function BentoTile({
         gridRow: `${desktopLayout.rowStart} / span ${effectiveRowSpan}`,
       }}
     >
-      <div ref={contentRef}>{children}</div>
+      <div ref={contentRef} className={autoHeight ? "" : "h-full"}>{children}</div>
     </div>
   );
 }
