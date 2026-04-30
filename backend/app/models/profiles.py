@@ -9,6 +9,7 @@ class ProfileResponse(BaseModel):
     bio: str | None = None
     is_public: bool = False
     avatar_url: str | None = None
+    avatar_color: str | None = "#223843"
     streak_count: int = 0
     created_at: datetime | None = None
 
@@ -19,3 +20,4 @@ class ProfileUpdate(BaseModel):
     bio: str | None = None
     is_public: bool | None = None
     avatar_url: str | None = None
+    avatar_color: str | None = None

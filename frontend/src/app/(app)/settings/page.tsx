@@ -12,7 +12,21 @@ interface Profile {
   bio: string | null;
   is_public: boolean;
   avatar_url: string | null;
+  avatar_color: string | null;
 }
+
+const AVATAR_COLORS = [
+  "#223843",
+  "#fb5012",
+  "#d8b4a0",
+  "#dbd3d8",
+  "#4a7c59",
+  "#6b5b95",
+  "#e8a87c",
+  "#41b3a3",
+  "#c38d9e",
+  "#659dbd",
+];
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -25,6 +39,7 @@ export default function SettingsPage() {
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
   const [isPublic, setIsPublic] = useState(false);
+  const [avatarColor, setAvatarColor] = useState(AVATAR_COLORS[0]);
 
   useEffect(() => {
     api
@@ -35,6 +50,7 @@ export default function SettingsPage() {
         setDisplayName(p.display_name || "");
         setBio(p.bio || "");
         setIsPublic(p.is_public);
+        setAvatarColor(p.avatar_color || AVATAR_COLORS[0]);
       })
       .catch((e) => console.error("Failed to load profile:", e))
       .finally(() => setLoading(false));
@@ -49,6 +65,7 @@ export default function SettingsPage() {
         display_name: displayName || null,
         bio: bio || null,
         is_public: isPublic,
+        avatar_color: avatarColor,
       });
       setProfile(updated);
       setMessage("Saved!");
@@ -82,6 +99,28 @@ export default function SettingsPage() {
       </h1>
 
       <div className="max-w-md space-y-5">
+        <div>
+          <label className="mb-2 block text-sm text-text/60">Profile colour</label>
+          <div className="flex items-center gap-4">
+            <div
+              className="size-16 shrink-0 rounded-full"
+              style={{ backgroundColor: avatarColor }}
+            />
+            <div className="flex flex-wrap gap-2">
+              {AVATAR_COLORS.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => setAvatarColor(color)}
+                  className={`size-8 rounded-full transition-transform ${
+                    avatarColor === color ? "scale-110 ring-2 ring-text ring-offset-2 ring-offset-bg" : "hover:scale-105"
+                  }`}
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
         <div>
           <label className="mb-1 block text-sm text-text/60">Username</label>
           <input

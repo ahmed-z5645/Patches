@@ -49,7 +49,6 @@ async def update_my_profile(
         db.table("profiles")
         .update(update_data)
         .eq("id", user_id)
-        .single()
         .execute()
     )
 
@@ -71,7 +70,7 @@ async def update_my_profile(
             ]
             db.table("notifications").insert(notifications).execute()
 
-    return result.data
+    return result.data[0]
 
 
 @router.get("/{username}", response_model=ProfileResponse)

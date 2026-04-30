@@ -14,6 +14,7 @@ interface Profile {
   bio: string | null;
   is_public: boolean;
   avatar_url: string | null;
+  avatar_color: string | null;
 }
 
 export function ProfileClient({ profile }: { profile: Profile }) {
@@ -90,7 +91,7 @@ export function ProfileClient({ profile }: { profile: Profile }) {
       <div className="space-y-8">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-5">
-            <div className="size-20 rounded-full bg-primary" />
+            <div className="size-20 shrink-0 rounded-full" style={{ backgroundColor: profile.avatar_color || "#223843" }} />
             <div>
               <h1 className="font-[family-name:var(--font-cabinet)] text-3xl font-bold">
                 {profile.display_name || profile.username}
@@ -141,9 +142,9 @@ export function ProfileClient({ profile }: { profile: Profile }) {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
         <div className="flex items-center gap-5">
-          <div className="size-20 rounded-full bg-primary" />
+          <div className="size-20 shrink-0 rounded-full" style={{ backgroundColor: profile.avatar_color || "#223843" }} />
           <div>
             <h1 className="font-[family-name:var(--font-cabinet)] text-3xl font-bold">
               {profile.display_name || profile.username}
@@ -154,35 +155,37 @@ export function ProfileClient({ profile }: { profile: Profile }) {
             )}
           </div>
         </div>
-        {!isOwnProfile && (
-          <FollowButton
-            userId={profile.id}
-            initialFollowing={isFollowing}
-            initialStatus={followStatus}
-          />
-        )}
-      </div>
 
-      {isOwnProfile && (
-        <div className="flex gap-6 text-sm">
-          <Link href={`/${profile.username}/followers`} className="hover:text-accent">
-            <strong>{followerCount}</strong>{" "}
-            <span className="text-text/40">
-              {followerCount === 1 ? "follower" : "followers"}
-            </span>
-          </Link>
-          <Link href={`/${profile.username}/following`} className="hover:text-accent">
-            <strong>{followingCount}</strong>{" "}
-            <span className="text-text/40">following</span>
-          </Link>
-          <span>
-            <strong>{posts.length}</strong>{" "}
-            <span className="text-text/40">
-              {posts.length === 1 ? "post" : "posts"}
-            </span>
-          </span>
+        <div className="flex items-center gap-6">
+          {isOwnProfile && (
+            <div className="flex flex-1 justify-around gap-6 text-sm md:flex-none md:justify-start">
+              <Link href={`/${profile.username}/followers`} className="text-center hover:text-accent">
+                <strong className="block text-lg">{followerCount}</strong>
+                <span className="text-text/40">
+                  {followerCount === 1 ? "follower" : "followers"}
+                </span>
+              </Link>
+              <Link href={`/${profile.username}/following`} className="text-center hover:text-accent">
+                <strong className="block text-lg">{followingCount}</strong>
+                <span className="text-text/40">following</span>
+              </Link>
+              <span className="text-center">
+                <strong className="block text-lg">{posts.length}</strong>
+                <span className="text-text/40">
+                  {posts.length === 1 ? "post" : "posts"}
+                </span>
+              </span>
+            </div>
+          )}
+          {!isOwnProfile && (
+            <FollowButton
+              userId={profile.id}
+              initialFollowing={isFollowing}
+              initialStatus={followStatus}
+            />
+          )}
         </div>
-      )}
+      </div>
 
       <hr className="border-primary" />
 

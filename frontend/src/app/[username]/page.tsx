@@ -9,6 +9,7 @@ interface Profile {
   bio: string | null;
   is_public: boolean;
   avatar_url: string | null;
+  avatar_color: string | null;
 }
 
 async function getProfile(username: string): Promise<Profile | null> {
