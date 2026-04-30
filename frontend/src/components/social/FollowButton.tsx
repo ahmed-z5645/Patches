@@ -18,6 +18,7 @@ export function FollowButton({
     initialFollowing ? "accepted" : initialStatus
   );
   const [loading, setLoading] = useState(false);
+  const [hovering, setHovering] = useState(false);
 
   async function handleToggle() {
     setLoading(true);
@@ -45,7 +46,9 @@ export function FollowButton({
 
   const label =
     status === "accepted"
-      ? "Following"
+      ? hovering
+        ? "Unfollow"
+        : "Following"
       : status === "pending"
         ? "Requested"
         : "Follow";
@@ -53,10 +56,14 @@ export function FollowButton({
   return (
     <button
       onClick={handleToggle}
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
       disabled={loading}
-      className={`rounded-[15px] px-5 py-2 text-sm transition-colors ${
+      className={`rounded-[15px] px-5 py-2 text-sm font-medium transition-colors ${
         status === "accepted"
-          ? "border border-primary text-text/60 hover:border-accent hover:text-accent"
+          ? hovering
+            ? "border border-red-500/50 text-red-500"
+            : "border border-primary text-text/60"
           : status === "pending"
             ? "border border-primary text-text/40 hover:border-text/40"
             : "bg-text text-bg hover:bg-text/90"

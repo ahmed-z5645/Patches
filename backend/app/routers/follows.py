@@ -173,7 +173,22 @@ async def get_followers(
         .eq("status", "accepted")
         .execute()
     )
-    return [row["profiles"] for row in result.data or []]
+    follower_ids = [row["follower_id"] for row in result.data or []]
+    following_back = set()
+    if follower_ids:
+        fb = (
+            db.table("follows")
+            .select("following_id")
+            .eq("follower_id", current_user)
+            .eq("status", "accepted")
+            .in_("following_id", follower_ids)
+            .execute()
+        )
+        following_back = {row["following_id"] for row in fb.data or []}
+    return [
+        {**row["profiles"], "is_following_back": row["follower_id"] in following_back}
+        for row in result.data or []
+    ]
 
 
 @router.get("/following", response_model=list[FollowerProfile])

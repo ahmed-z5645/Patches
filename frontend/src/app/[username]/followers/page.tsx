@@ -12,6 +12,7 @@ interface UserRow {
   username: string;
   display_name: string | null;
   avatar_url: string | null;
+  is_following_back: boolean;
 }
 
 export default function FollowersPage() {
@@ -83,7 +84,11 @@ export default function FollowersPage() {
                 </div>
               </Link>
               {user.id !== currentUserId && (
-                <FollowButton userId={user.id} initialFollowing={false} />
+                <FollowButton
+                  userId={user.id}
+                  initialFollowing={user.is_following_back}
+                  initialStatus={user.is_following_back ? "accepted" : null}
+                />
               )}
             </div>
           ))}
