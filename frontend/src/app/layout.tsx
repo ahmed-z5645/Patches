@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { ServiceWorkerRegistrar } from "@/components/ServiceWorkerRegistrar";
+import { QueryProvider } from "@/providers/QueryProvider";
 import "./globals.css";
 
 const satoshi = localFont({
@@ -46,7 +47,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full bg-bg text-text font-[family-name:var(--font-satoshi)] antialiased">
         <ServiceWorkerRegistrar />
-        {children}
+        <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
   );

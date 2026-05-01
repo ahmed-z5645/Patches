@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { keys } from "@/lib/query-keys";
 import { FeedCard } from "@/components/feed/FeedCard";
 
 interface ArchiveWeek {
@@ -15,18 +16,13 @@ interface ArchiveResponse {
 }
 
 export default function ArchivePage() {
-  const [archive, setArchive] = useState<ArchiveResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: archive, isLoading } = useQuery({
+    queryKey: keys.archive(),
+    queryFn: () => api.get<ArchiveResponse>("/api/feed/archive"),
+    staleTime: 10 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    api
-      .get<ArchiveResponse>("/api/feed/archive")
-      .then(setArchive)
-      .catch((e) => console.error("Failed to load archive:", e))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <div className="size-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />

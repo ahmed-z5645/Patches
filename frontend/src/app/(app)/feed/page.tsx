@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect } from "react";
+import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { keys } from "@/lib/query-keys";
 import { FeedLockGate } from "@/components/feed/FeedLockGate";
 import { FeedSkeleton } from "@/components/feed/FeedSkeleton";
 import { PostCard, type PostCardData } from "@/components/feed/PostCard";
@@ -20,62 +22,50 @@ interface OlderResponse {
 }
 
 export default function FeedPage() {
-  const [feed, setFeed] = useState<FeedResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const [olderPosts, setOlderPosts] = useState<PostCardData[]>([]);
-  const [olderOffset, setOlderOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingOlder, setLoadingOlder] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    api
-      .get<FeedResponse>("/api/feed")
-      .then(setFeed)
-      .catch((e) => console.error("Failed to load feed:", e))
-      .finally(() => setLoading(false));
-  }, []);
+  const { data: feed, isLoading } = useQuery({
+    queryKey: keys.feed(),
+    queryFn: () => api.get<FeedResponse>("/api/feed"),
+    staleTime: 2 * 60 * 1000,
+  });
 
-  const loadMore = useCallback(async () => {
-    if (loadingOlder || !hasMore) return;
-    setLoadingOlder(true);
-    try {
-      const res = await api.get<OlderResponse>(
-        `/api/feed/older?offset=${olderOffset}&limit=6`
-      );
-      setOlderPosts((prev) => [...prev, ...res.posts]);
-      setOlderOffset((prev) => prev + res.posts.length);
-      setHasMore(res.has_more);
-    } catch (e) {
-      console.error("Failed to load older posts:", e);
-    } finally {
-      setLoadingOlder(false);
-    }
-  }, [olderOffset, hasMore, loadingOlder]);
+  const {
+    data: olderData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: keys.feedOlder(),
+    queryFn: ({ pageParam }) =>
+      api.get<OlderResponse>(`/api/feed/older?offset=${pageParam}&limit=6`),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (!lastPage.has_more) return undefined;
+      return allPages.reduce((sum, p) => sum + p.posts.length, 0);
+    },
+    enabled: !!feed && !feed.locked,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  const olderPosts = olderData?.pages.flatMap((p) => p.posts) ?? [];
+
+  const loadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   useEffect(() => {
     if (!feed || feed.locked) return;
-
     const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          loadMore();
-        }
-      },
+      (entries) => { if (entries[0].isIntersecting) loadMore(); },
       { rootMargin: "200px" }
     );
-
     const el = sentinelRef.current;
     if (el) observer.observe(el);
-    return () => {
-      if (el) observer.unobserve(el);
-    };
+    return () => { if (el) observer.unobserve(el); };
   }, [feed, loadMore]);
 
-  if (loading) {
-    return <FeedSkeleton />;
-  }
+  if (isLoading) return <FeedSkeleton />;
 
   if (!feed) {
     return (
@@ -132,7 +122,7 @@ export default function FeedPage() {
 
           <div ref={sentinelRef} className="h-1" />
 
-          {loadingOlder && (
+          {isFetchingNextPage && (
             <div className="flex justify-center py-6">
               <div className="size-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
             </div>

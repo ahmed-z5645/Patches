@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { keys } from "@/lib/query-keys";
 import {
   DndContext,
   PointerSensor,
@@ -102,6 +104,7 @@ function findNextPosition(blocks: Block[]): DesktopLayout {
 }
 
 export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState(post.title || "");
   const [blocks, setBlocks] = useState<Block[]>(initialBlocks);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -112,6 +115,8 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
   const [username, setUsername] = useState("");
   const dirtyBlocksRef = useRef<Set<string>>(new Set());
   const dirtyLayoutsRef = useRef<Set<string>>(new Set());
+  const pendingCreatesRef = useRef<Set<string>>(new Set());
+  const pendingDeletesRef = useRef<Set<string>>(new Set());
 
   const gridRef = useRef<HTMLDivElement>(null);
   const mobileGridRef = useRef<HTMLDivElement>(null);
@@ -189,9 +194,31 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
   }, [blocks]);
 
   const saveAll = useCallback(async () => {
-    if (!hasUnsavedChanges) return;
+    const hasCreates = pendingCreatesRef.current.size > 0;
+    const hasDeletes = pendingDeletesRef.current.size > 0;
+    if (!hasUnsavedChanges && !hasCreates && !hasDeletes) return;
     setIsSaving(true);
     try {
+      // Phase 1: Create staged blocks — content/layout come from current state
+      for (const tempId of pendingCreatesRef.current) {
+        const block = blocks.find((b) => b.id === tempId);
+        if (!block) continue;
+        const created = await api.post<Block>(`/api/posts/${post.id}/blocks`, {
+          type: block.type,
+          content: block.content,
+          grid_layout_desktop: block.grid_layout_desktop,
+          grid_layout_mobile: block.grid_layout_mobile,
+        });
+        setBlocks((prev) =>
+          prev.map((b) => (b.id === tempId ? { ...b, id: created.id } : b))
+        );
+        // Block was just created with current content — no need to re-PUT
+        dirtyBlocksRef.current.delete(tempId);
+        dirtyLayoutsRef.current.delete(tempId);
+      }
+      pendingCreatesRef.current.clear();
+
+      // Phase 2: Update post title + dirty blocks/layouts in parallel
       const promises: Promise<unknown>[] = [];
       promises.push(api.put(`/api/posts/${post.id}`, { title }));
       for (const blockId of dirtyBlocksRef.current) {
@@ -217,12 +244,23 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
       dirtyBlocksRef.current.clear();
       dirtyLayoutsRef.current.clear();
       setHasUnsavedChanges(false);
+
+      // Phase 3: Delete removed blocks
+      if (pendingDeletesRef.current.size > 0) {
+        await Promise.all(
+          [...pendingDeletesRef.current].map((id) => api.delete(`/api/blocks/${id}`))
+        );
+        pendingDeletesRef.current.clear();
+      }
+
+      queryClient.invalidateQueries({ queryKey: keys.post(post.id) });
+      queryClient.invalidateQueries({ queryKey: keys.postBlocks(post.id) });
     } catch (e) {
       console.error("Failed to save:", e);
     } finally {
       setIsSaving(false);
     }
-  }, [hasUnsavedChanges, title, blocks, post.id]);
+  }, [hasUnsavedChanges, title, blocks, post.id, queryClient]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -353,102 +391,66 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
     setHasUnsavedChanges(true);
   }
 
-  async function handleAddBlock(type: BlockType, col?: number, row?: number) {
-    const defaults = DEFAULT_LAYOUTS[type] || {
-      colStart: 1,
-      colSpan: 1,
-      rowStart: 1,
-      rowSpan: 2,
-    };
-    const position = col != null && row != null
-      ? { colStart: col, rowStart: row }
-      : findNextPosition(blocks);
-    const gridLayout = {
-      ...defaults,
-      colStart: position.colStart,
-      rowStart: position.rowStart,
-    };
-
-    const mobileDefaults = DEFAULT_MOBILE_LAYOUTS[type] || {
-      colStart: 1,
-      colSpan: 1,
-      rowStart: 1,
-      rowSpan: 2,
-    };
-    const mobilePosition = findNextMobilePosition(blocks);
-    const mobileGridLayout = {
-      ...mobileDefaults,
-      colStart: mobilePosition.colStart,
-      rowStart: mobilePosition.rowStart,
-    };
-
-    try {
-      const newBlock = await api.post<Block>(`/api/posts/${post.id}/blocks`, {
-        type,
-        content:
-          type === "markdown"
-            ? { markdown: "" }
-            : type === "quote"
-              ? { text: "" }
-              : type === "code"
-                ? { code: "", language: "javascript" }
-                : {},
-        grid_layout_desktop: gridLayout,
-        grid_layout_mobile: mobileGridLayout,
-      });
-      setBlocks((prev) => [...prev, newBlock]);
-    } catch (e) {
-      console.error("Failed to add block:", e);
-    }
+  function buildLocalBlock(
+    type: BlockType,
+    gridLayout: DesktopLayout,
+    mobileGridLayout: MobileLayout
+  ): Block {
+    const tempId = `temp-${crypto.randomUUID()}`;
+    const content =
+      type === "markdown"
+        ? { markdown: "" }
+        : type === "quote"
+          ? { text: "" }
+          : type === "code"
+            ? { code: "", language: "javascript" }
+            : {};
+    return {
+      id: tempId,
+      post_id: post.id,
+      parent_block_id: null,
+      type,
+      content,
+      grid_layout_desktop: gridLayout,
+      grid_layout_mobile: mobileGridLayout,
+      float_position: null,
+      z_index: 0,
+      sort_order: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as Block;
   }
 
-  async function handleMobileAddBlock(type: BlockType, col?: number, row?: number) {
-    const mobileDefaults = DEFAULT_MOBILE_LAYOUTS[type] || {
-      colStart: 1,
-      colSpan: 1,
-      rowStart: 1,
-      rowSpan: 2,
-    };
-    const position = col != null && row != null
-      ? { colStart: col, rowStart: row }
-      : findNextMobilePosition(blocks);
-    const mobileGridLayout = {
-      ...mobileDefaults,
-      colStart: position.colStart,
-      rowStart: position.rowStart,
-    };
+  function handleAddBlock(type: BlockType, col?: number, row?: number) {
+    const defaults = DEFAULT_LAYOUTS[type] || { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 };
+    const position =
+      col != null && row != null ? { colStart: col, rowStart: row } : findNextPosition(blocks);
+    const gridLayout = { ...defaults, colStart: position.colStart, rowStart: position.rowStart };
 
-    const desktopDefaults = DEFAULT_LAYOUTS[type] || {
-      colStart: 1,
-      colSpan: 1,
-      rowStart: 1,
-      rowSpan: 2,
-    };
+    const mobileDefaults = DEFAULT_MOBILE_LAYOUTS[type] || { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 };
+    const mobilePosition = findNextMobilePosition(blocks);
+    const mobileGridLayout = { ...mobileDefaults, colStart: mobilePosition.colStart, rowStart: mobilePosition.rowStart };
+
+    const newBlock = buildLocalBlock(type, gridLayout, mobileGridLayout);
+    pendingCreatesRef.current.add(newBlock.id);
+    setBlocks((prev) => [...prev, newBlock]);
+    setHasUnsavedChanges(true);
+  }
+
+  function handleMobileAddBlock(type: BlockType, col?: number, row?: number) {
+    const mobileDefaults = DEFAULT_MOBILE_LAYOUTS[type] || { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 };
+    const position =
+      col != null && row != null ? { colStart: col, rowStart: row } : findNextMobilePosition(blocks);
+    const mobileGridLayout = { ...mobileDefaults, colStart: position.colStart, rowStart: position.rowStart };
+
+    const desktopDefaults = DEFAULT_LAYOUTS[type] || { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 };
     const desktopPosition = findNextPosition(blocks);
-    const desktopGridLayout = {
-      ...desktopDefaults,
-      colStart: desktopPosition.colStart,
-      rowStart: desktopPosition.rowStart,
-    };
+    const desktopGridLayout = { ...desktopDefaults, colStart: desktopPosition.colStart, rowStart: desktopPosition.rowStart };
 
-    try {
-      const newBlock = await api.post<Block>(`/api/posts/${post.id}/blocks`, {
-        type,
-        content:
-          type === "markdown"
-            ? { markdown: "" }
-            : type === "quote"
-              ? { text: "" }
-              : type === "code"
-                ? { code: "", language: "javascript" }
-                : {},
-        grid_layout_desktop: desktopGridLayout,
-        grid_layout_mobile: mobileGridLayout,
-      });
-      setBlocks((prev) => [...prev, newBlock]);
-    } catch (e) {
-      console.error("Failed to add block:", e);
-    }
+    const newBlock = buildLocalBlock(type, desktopGridLayout, mobileGridLayout);
+    pendingCreatesRef.current.add(newBlock.id);
+    setBlocks((prev) => [...prev, newBlock]);
+    setHasUnsavedChanges(true);
   }
 
   function handleTitleChange(value: string) {
@@ -464,15 +466,32 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
     setIsPublishing(true);
     setShowMobileReview(false);
     try {
-      await api.put(`/api/posts/${post.id}`, { title, cover_color: coverColor, tags });
+      // Phase 1: Create any staged blocks
+      for (const tempId of pendingCreatesRef.current) {
+        const block = blocks.find((b) => b.id === tempId);
+        if (!block) continue;
+        const created = await api.post<Block>(`/api/posts/${post.id}/blocks`, {
+          type: block.type,
+          content: block.content,
+          grid_layout_desktop: block.grid_layout_desktop,
+          grid_layout_mobile: block.grid_layout_mobile,
+        });
+        setBlocks((prev) =>
+          prev.map((b) => (b.id === tempId ? { ...b, id: created.id } : b))
+        );
+        dirtyBlocksRef.current.delete(tempId);
+        dirtyLayoutsRef.current.delete(tempId);
+      }
+      pendingCreatesRef.current.clear();
 
+      // Phase 2: Save post (with cover/tags) + dirty blocks
+      await api.put(`/api/posts/${post.id}`, { title, cover_color: coverColor, tags });
       for (const blockId of dirtyBlocksRef.current) {
         const block = blocks.find((b) => b.id === blockId);
         if (block) {
           await api.put(`/api/blocks/${blockId}`, { content: block.content, z_index: block.z_index });
         }
       }
-
       for (const blockId of dirtyLayoutsRef.current) {
         const block = blocks.find((b) => b.id === blockId);
         if (block) {
@@ -482,6 +501,14 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
           });
         }
       }
+      dirtyBlocksRef.current.clear();
+      dirtyLayoutsRef.current.clear();
+
+      // Phase 3: Delete removed blocks
+      await Promise.all(
+        [...pendingDeletesRef.current].map((id) => api.delete(`/api/blocks/${id}`))
+      );
+      pendingDeletesRef.current.clear();
 
       await api.post(`/api/posts/${post.id}/publish`);
       window.location.href = "/feed";
@@ -496,15 +523,16 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
     await saveAll();
   }
 
-  async function handleDeleteBlock(blockId: string) {
-    try {
-      await api.delete(`/api/blocks/${blockId}`);
-      setBlocks((prev) => prev.filter((b) => b.id !== blockId));
-      dirtyBlocksRef.current.delete(blockId);
-      dirtyLayoutsRef.current.delete(blockId);
-    } catch (e) {
-      console.error("Failed to delete block:", e);
+  function handleDeleteBlock(blockId: string) {
+    if (blockId.startsWith("temp-")) {
+      pendingCreatesRef.current.delete(blockId);
+    } else {
+      pendingDeletesRef.current.add(blockId);
     }
+    setBlocks((prev) => prev.filter((b) => b.id !== blockId));
+    dirtyBlocksRef.current.delete(blockId);
+    dirtyLayoutsRef.current.delete(blockId);
+    setHasUnsavedChanges(true);
   }
 
   const prepublishModal = showMobileReview && (

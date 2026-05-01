@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { api } from "@/lib/api";
+import { keys } from "@/lib/query-keys";
 import { useRouter } from "next/navigation";
 import { SettingsSkeleton } from "@/components/settings/SettingsSkeleton";
 
@@ -31,8 +33,7 @@ const AVATAR_COLORS = [
 
 export default function SettingsPage() {
   const router = useRouter();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -42,33 +43,32 @@ export default function SettingsPage() {
   const [isPublic, setIsPublic] = useState(false);
   const [avatarColor, setAvatarColor] = useState(AVATAR_COLORS[0]);
 
+  const { data: profile, isLoading: loading } = useQuery({
+    queryKey: keys.myProfile(),
+    queryFn: () => api.get<Profile>("/api/profiles/me"),
+  });
+
   useEffect(() => {
-    api
-      .get<Profile>("/api/profiles/me")
-      .then((p) => {
-        setProfile(p);
-        setUsername(p.username || "");
-        setDisplayName(p.display_name || "");
-        setBio(p.bio || "");
-        setIsPublic(p.is_public);
-        setAvatarColor(p.avatar_color || AVATAR_COLORS[0]);
-      })
-      .catch((e) => console.error("Failed to load profile:", e))
-      .finally(() => setLoading(false));
-  }, []);
+    if (!profile) return;
+    setUsername(profile.username || "");
+    setDisplayName(profile.display_name || "");
+    setBio(profile.bio || "");
+    setIsPublic(profile.is_public);
+    setAvatarColor(profile.avatar_color || AVATAR_COLORS[0]);
+  }, [profile]);
 
   async function handleSave() {
     setSaving(true);
     setMessage("");
     try {
-      const updated = await api.put<Profile>("/api/profiles/me", {
+      await api.put<Profile>("/api/profiles/me", {
         username,
         display_name: displayName || null,
         bio: bio || null,
         is_public: isPublic,
         avatar_color: avatarColor,
       });
-      setProfile(updated);
+      queryClient.invalidateQueries({ queryKey: keys.myProfile() });
       setMessage("Saved!");
       setTimeout(() => setMessage(""), 2000);
     } catch (e) {

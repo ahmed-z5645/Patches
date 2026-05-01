@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { keys } from "@/lib/query-keys";
 import type { Block, Post } from "@/lib/types/blocks";
 import { BentoGrid } from "@/components/bento/BentoGrid";
 import { BentoTile } from "@/components/bento/BentoTile";
@@ -21,17 +23,12 @@ interface FullPost extends Post {
 
 export default function PostPage() {
   const { postId } = useParams<{ postId: string }>();
-  const [post, setPost] = useState<FullPost | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    api
-      .get<FullPost>(`/api/posts/${postId}`)
-      .then(setPost)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [postId]);
+  const { data: post, isLoading, error } = useQuery({
+    queryKey: keys.post(postId),
+    queryFn: () => api.get<FullPost>(`/api/posts/${postId}`),
+    enabled: !!postId,
+  });
 
   const topLevelBlocks = useMemo(
     () => (post?.blocks || []).filter((b) => !b.parent_block_id),
@@ -49,7 +46,7 @@ export default function PostPage() {
     return map;
   }, [post?.blocks]);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <div className="size-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
