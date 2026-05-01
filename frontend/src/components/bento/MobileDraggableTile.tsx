@@ -145,7 +145,14 @@ export function MobileDraggableTile({
         className="absolute bottom-1 right-1 flex size-6 cursor-nwse-resize items-center justify-center rounded-sm"
       >
         <svg viewBox="0 0 10 10" className="size-3 text-text/30">
-          <path d="M9 1v8H1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          {/* Soft curved corner: Starts at (9,2), curves toward (9,9), ends at (2,9) */}
+          <path 
+            d="M9 2 Q9 9 2 9" 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth="1.5" 
+            strokeLinecap="round" 
+          />
         </svg>
       </div>
     </motion.div>

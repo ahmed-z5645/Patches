@@ -152,7 +152,14 @@ export function DraggableTile({
         className="absolute bottom-1 right-1 flex size-5 cursor-nwse-resize items-center justify-center rounded-sm opacity-0 transition-opacity group-hover/tile:opacity-100"
       >
         <svg viewBox="0 0 10 10" className="size-3 text-text/40">
-          <path d="M9 1v8H1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          {/* Updated path for a rounded 16pt-style corner */}
+          <path 
+            d="M9 2 Q9 9 2 9" 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth="1.5" 
+            strokeLinecap="round" 
+          />
         </svg>
       </div>
     </motion.div>
