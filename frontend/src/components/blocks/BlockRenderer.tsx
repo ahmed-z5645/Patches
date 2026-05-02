@@ -67,6 +67,15 @@ export function BlockRenderer({
           onUpdate={handleUpdate}
         />
       );
+    case "apple_music":
+      return (
+        <EmbedBlock
+          url={block.content.url}
+          label="Apple Music"
+          isEditing={isEditing}
+          onUpdate={handleUpdate}
+        />
+      );
     case "strava":
       return (
         <EmbedBlock

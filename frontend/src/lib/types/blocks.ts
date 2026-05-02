@@ -5,6 +5,7 @@ export type BlockType =
   | "image"
   | "quote"
   | "spotify"
+  | "apple_music"
   | "strava"
   | "map"
   | "code"
@@ -39,6 +40,11 @@ export interface SpotifyBlock extends BaseBlock {
   content: { url: string };
 }
 
+export interface AppleMusicBlock extends BaseBlock {
+  type: "apple_music";
+  content: { url: string };
+}
+
 export interface StravaBlock extends BaseBlock {
   type: "strava";
   content: { url: string };
@@ -69,6 +75,7 @@ export type Block =
   | ImageBlock
   | QuoteBlock
   | SpotifyBlock
+  | AppleMusicBlock
   | StravaBlock
   | MapBlock
   | CodeBlock

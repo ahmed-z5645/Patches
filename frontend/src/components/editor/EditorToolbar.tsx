@@ -11,6 +11,7 @@ const blockTypes: { type: BlockType; label: string }[] = [
   { type: "image", label: "Image" },
   { type: "code", label: "Code" },
   { type: "spotify", label: "Spotify" },
+  { type: "apple_music", label: "Apple Music" },
   { type: "strava", label: "Strava" },
 ];
 

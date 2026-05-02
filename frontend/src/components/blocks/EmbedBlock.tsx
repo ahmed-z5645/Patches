@@ -8,6 +8,12 @@ function getSpotifyEmbedUrl(url: string): string | null {
   return `https://open.spotify.com/embed/${match[1]}/${match[2]}?utm_source=generator&theme=0`;
 }
 
+function getAppleMusicEmbedUrl(url: string): string | null {
+  // Covers tracks, albums, playlists: swap host to embed.music.apple.com
+  if (!url.includes("music.apple.com")) return null;
+  return url.replace("music.apple.com", "embed.music.apple.com");
+}
+
 function getStravaEmbedUrl(url: string): string | null {
   const match = url.match(/strava\.com\/activities\/(\d+)/);
   if (!match) return null;
@@ -48,8 +54,9 @@ export function EmbedBlock({ url, label, isEditing, onUpdate }: EmbedBlockProps)
   }
 
   const spotifyEmbed = label === "Spotify" ? getSpotifyEmbedUrl(url) : null;
+  const appleMusicEmbed = label === "Apple Music" ? getAppleMusicEmbedUrl(url) : null;
   const stravaEmbed = label === "Strava" ? getStravaEmbedUrl(url) : null;
-  const embedUrl = spotifyEmbed || stravaEmbed;
+  const embedUrl = spotifyEmbed || appleMusicEmbed || stravaEmbed;
 
   if (embedUrl) {
     return (

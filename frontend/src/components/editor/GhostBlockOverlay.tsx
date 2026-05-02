@@ -84,6 +84,7 @@ const ALL_TYPES: { type: BlockType; label: string }[] = [
   { type: "quote", label: "Quote" },
   { type: "code", label: "Code" },
   { type: "spotify", label: "Spotify" },
+  { type: "apple_music", label: "Apple Music" },
   { type: "strava", label: "Strava" },
   { type: "map", label: "Map" },
   { type: "weather", label: "Weather" },
