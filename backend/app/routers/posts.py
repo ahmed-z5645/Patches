@@ -109,6 +109,9 @@ async def update_post(
     if not update_data:
         return post.data
 
+    if post.data.get("is_published") and is_late_for_week(post.data["week_number"], post.data["year"]):
+        update_data["is_late"] = True
+
     result = (
         db.table("posts").update(update_data).eq("id", post_id).execute()
     )

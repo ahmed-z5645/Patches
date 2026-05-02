@@ -2,14 +2,30 @@
 
 import { useState, useEffect } from "react";
 
-function getTimeUntilSunday(): string {
+function getNextReveal(): Date {
   const now = new Date();
-  const daysUntilSunday = (7 - now.getUTCDay()) % 7 || 7;
-  const nextSunday = new Date(now);
-  nextSunday.setUTCDate(now.getUTCDate() + daysUntilSunday);
-  nextSunday.setUTCHours(0, 0, 0, 0);
+  // Map now into Eastern time by abusing the locale-string trick:
+  // eastern is a Date whose local-time fields read as Eastern values.
+  const eastern = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const offsetMs = eastern.getTime() - now.getTime();
 
-  const diff = nextSunday.getTime() - now.getTime();
+  // Days until Monday (0 = today is Monday)
+  const dayOfWeek = eastern.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  let daysUntilMonday = (1 - dayOfWeek + 7) % 7;
+  if (daysUntilMonday === 0 && eastern.getHours() >= 9) {
+    daysUntilMonday = 7; // already past 9 AM Monday — use next week
+  }
+
+  const targetEastern = new Date(eastern);
+  targetEastern.setDate(eastern.getDate() + daysUntilMonday);
+  targetEastern.setHours(9, 0, 0, 0);
+
+  // Subtract the offset to convert "Eastern fake-local" back to true UTC
+  return new Date(targetEastern.getTime() - offsetMs);
+}
+
+function getTimeUntilReveal(): string {
+  const diff = getNextReveal().getTime() - Date.now();
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
 
@@ -22,8 +38,8 @@ export function CountdownPill() {
   const [text, setText] = useState("");
 
   useEffect(() => {
-    setText(getTimeUntilSunday());
-    const interval = setInterval(() => setText(getTimeUntilSunday()), 60000);
+    setText(getTimeUntilReveal());
+    const interval = setInterval(() => setText(getTimeUntilReveal()), 60000);
     return () => clearInterval(interval);
   }, []);
 

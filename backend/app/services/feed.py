@@ -1,5 +1,5 @@
 from supabase import Client
-from app.services.weeks import get_edition_week
+from app.services.weeks import get_edition_week, is_revealed
 
 
 def is_week_unlocked(db: Client, user_id: str, week: int, year: int) -> bool:
@@ -17,13 +17,10 @@ def is_week_unlocked(db: Client, user_id: str, week: int, year: int) -> bool:
 
 
 def is_past_week(week: int, year: int) -> bool:
-    """Check if the given week is in the past."""
+    """Returns True if the week is in the past AND its Monday 9 AM reveal has passed."""
     current_week, current_year = get_edition_week()
-    if year < current_year:
-        return True
-    if year == current_year and week < current_week:
-        return True
-    return False
+    is_prior_week = year < current_year or (year == current_year and week < current_week)
+    return is_prior_week and is_revealed(week, year)
 
 
 def get_feed_posts(db: Client, user_id: str, week: int, year: int) -> list[dict]:
