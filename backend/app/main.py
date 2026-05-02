@@ -1,11 +1,25 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.config import get_settings
 from app.routers import profiles, posts, blocks, upload, follows, feed, search, notifications
+from app.routers import push
+from app.services.push_notifications import create_scheduler
 
 settings = get_settings()
 
-app = FastAPI(title="Edition API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler = create_scheduler()
+    scheduler.start()
+    yield
+    scheduler.shutdown()
+
+
+app = FastAPI(title="Edition API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,6 +41,7 @@ app.include_router(follows.router)
 app.include_router(feed.router)
 app.include_router(search.router)
 app.include_router(notifications.router)
+app.include_router(push.router)
 
 
 @app.get("/api/health")
