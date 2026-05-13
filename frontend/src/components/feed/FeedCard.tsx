@@ -76,6 +76,7 @@ export function FeedCard({ post }: { post: FeedPost }) {
             key={block.id}
             desktopLayout={block.grid_layout_desktop}
             mobileLayout={block.grid_layout_mobile}
+            blockStyle={block.style}
           >
             <BlockRenderer block={block} />
           </BentoTile>

@@ -13,6 +13,7 @@ class BlockResponse(BaseModel):
     float_position: str | None = None
     z_index: int = 0
     sort_order: int = 0
+    style: dict[str, Any] = {}
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -24,11 +25,13 @@ class BlockCreate(BaseModel):
     grid_layout_mobile: dict[str, Any] = {}
     parent_block_id: str | None = None
     float_position: str | None = None
+    style: dict[str, Any] | None = None
 
 
 class BlockUpdate(BaseModel):
     content: dict[str, Any] | None = None
     z_index: int | None = None
+    style: dict[str, Any] | None = None
 
 
 class BlockLayoutUpdate(BaseModel):

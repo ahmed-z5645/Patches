@@ -11,7 +11,8 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import type { Block, BlockType, Post } from "@/lib/types/blocks";
+import type { Block, BlockType, BlockStyle, Post } from "@/lib/types/blocks";
+import { BlockStyleToolbar } from "./BlockStyleToolbar";
 import type { DesktopLayout, MobileLayout } from "@/lib/types/grid";
 import { AnimatePresence } from "framer-motion";
 import { BentoGrid, BentoGridMobile } from "@/components/bento/BentoGrid";
@@ -115,6 +116,8 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
   const [showMobileReview, setShowMobileReview] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [username, setUsername] = useState("");
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const dirtyBlocksRef = useRef<Set<string>>(new Set());
   const dirtyLayoutsRef = useRef<Set<string>>(new Set());
   const pendingCreatesRef = useRef<Set<string>>(new Set());
@@ -210,6 +213,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
           content: block.content,
           grid_layout_desktop: block.grid_layout_desktop,
           grid_layout_mobile: block.grid_layout_mobile,
+          style: block.style,
         });
         setBlocks((prev) =>
           prev.map((b) => (b.id === tempId ? { ...b, id: created.id } : b))
@@ -227,7 +231,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
         const block = blocks.find((b) => b.id === blockId);
         if (block) {
           promises.push(
-            api.put(`/api/blocks/${blockId}`, { content: block.content, z_index: block.z_index })
+            api.put(`/api/blocks/${blockId}`, { content: block.content, z_index: block.z_index, style: block.style })
           );
         }
       }
@@ -270,16 +274,47 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
         e.preventDefault();
         saveAll();
       }
+      if (e.key === "Escape") {
+        setSelectedBlockId(null);
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [saveAll]);
+
+  useEffect(() => {
+    if (!selectedBlockId) return;
+    function handleMouseDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (toolbarRef.current && toolbarRef.current.contains(target)) return;
+      const tile = (target as HTMLElement).closest?.(`[data-block-id="${selectedBlockId}"]`);
+      if (tile) return;
+      setSelectedBlockId(null);
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [selectedBlockId]);
 
   const handleUpdateBlock = useCallback(
     (blockId: string, content: Record<string, unknown>) => {
       setBlocks((prev) =>
         prev.map((b) =>
           b.id === blockId ? ({ ...b, content } as Block) : b
+        )
+      );
+      dirtyBlocksRef.current.add(blockId);
+      setHasUnsavedChanges(true);
+    },
+    []
+  );
+
+  const handleUpdateStyle = useCallback(
+    (blockId: string, patch: Partial<BlockStyle>) => {
+      setBlocks((prev) =>
+        prev.map((b) =>
+          b.id === blockId
+            ? ({ ...b, style: { ...(b.style ?? {}), ...patch } } as Block)
+            : b
         )
       );
       dirtyBlocksRef.current.add(blockId);
@@ -477,6 +512,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
           content: block.content,
           grid_layout_desktop: block.grid_layout_desktop,
           grid_layout_mobile: block.grid_layout_mobile,
+          style: block.style,
         });
         setBlocks((prev) =>
           prev.map((b) => (b.id === tempId ? { ...b, id: created.id } : b))
@@ -491,7 +527,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
       for (const blockId of dirtyBlocksRef.current) {
         const block = blocks.find((b) => b.id === blockId);
         if (block) {
-          await api.put(`/api/blocks/${blockId}`, { content: block.content, z_index: block.z_index });
+          await api.put(`/api/blocks/${blockId}`, { content: block.content, z_index: block.z_index, style: block.style });
         }
       }
       for (const blockId of dirtyLayoutsRef.current) {
@@ -645,6 +681,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
       </p>
 
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+        <div className="relative">
         <BentoGrid ref={gridRef} minExtraRows={2} blocks={topLevelBlocks}>
           <AnimatePresence>
             {topLevelBlocks.map((block) => (
@@ -655,9 +692,13 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
                 mobileLayout={block.grid_layout_mobile}
                 gridMeta={gridMeta}
                 onResize={handleResize}
-                className="group relative border border-primary"
+                className="group relative"
                 autoHeight={block.type === "markdown"}
                 zIndex={block.z_index}
+                withBorder
+                blockStyle={block.style}
+                isSelected={selectedBlockId === block.id}
+                onSelect={() => setSelectedBlockId(block.id)}
               >
                 <button
                   onClick={() => handleDeleteBlock(block.id)}
@@ -680,6 +721,28 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
             onAddBlock={handleAddBlock}
           />
         </BentoGrid>
+        {(() => {
+          if (!selectedBlockId) return null;
+          const sel = topLevelBlocks.find((b) => b.id === selectedBlockId);
+          if (!sel || !gridMeta.colWidth) return null;
+          const gap = 16;
+          const L = sel.grid_layout_desktop;
+          const left = (L.colStart - 1) * (gridMeta.colWidth + gap);
+          const top = (L.rowStart - 1) * (gridMeta.rowHeight + gap) - 48;
+          return (
+            <div
+              ref={toolbarRef}
+              className="absolute z-30"
+              style={{ left, top }}
+            >
+              <BlockStyleToolbar
+                style={sel.style}
+                onChange={(patch) => handleUpdateStyle(sel.id, patch)}
+              />
+            </div>
+          );
+        })()}
+        </div>
       </DndContext>
 
       {prepublishModal}

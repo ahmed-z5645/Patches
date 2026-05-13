@@ -2,6 +2,8 @@
 
 import { useRef, useState, useEffect } from "react";
 import type { DesktopLayout, MobileLayout } from "@/lib/types/grid";
+import type { BlockStyle } from "@/lib/types/blocks";
+import { isDarkColor } from "@/lib/constants/colors";
 
 interface BentoTileProps {
   desktopLayout: DesktopLayout;
@@ -9,6 +11,8 @@ interface BentoTileProps {
   children: React.ReactNode;
   className?: string;
   autoHeight?: boolean;
+  withBorder?: boolean;
+  blockStyle?: BlockStyle;
 }
 
 export function BentoTile({
@@ -16,6 +20,8 @@ export function BentoTile({
   children,
   className,
   autoHeight,
+  withBorder,
+  blockStyle,
 }: BentoTileProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [effectiveRowSpan, setEffectiveRowSpan] = useState(desktopLayout.rowSpan);
@@ -47,12 +53,20 @@ export function BentoTile({
     return () => obs.disconnect();
   }, [autoHeight, desktopLayout.rowSpan]);
 
+  const borderless = blockStyle?.borderless;
+  const bgColor = blockStyle?.background_color;
+  const borderClass = withBorder && !borderless ? "border border-primary" : "";
+  const bgClass = bgColor ? "" : "bg-bg";
+  const dark = isDarkColor(bgColor);
+
   return (
     <div
-      className={`rounded-[15px] bg-bg ${autoHeight ? "" : "overflow-hidden"} ${className ?? ""}`}
+      className={`rounded-[15px] ${bgClass} ${borderClass} ${autoHeight ? "" : "overflow-hidden"} ${className ?? ""}`}
       style={{
         gridColumn: `${desktopLayout.colStart} / span ${desktopLayout.colSpan}`,
         gridRow: `${desktopLayout.rowStart} / span ${effectiveRowSpan}`,
+        ...(bgColor ? { backgroundColor: bgColor } : {}),
+        ...(dark ? { color: "#eff1f3" } : {}),
       }}
     >
       <div ref={contentRef} className={autoHeight ? "" : "h-full"}>{children}</div>
@@ -64,17 +78,29 @@ export function BentoTileMobile({
   mobileLayout,
   children,
   className,
+  withBorder,
+  blockStyle,
 }: {
   mobileLayout: MobileLayout;
   children: React.ReactNode;
   className?: string;
+  withBorder?: boolean;
+  blockStyle?: BlockStyle;
 }) {
+  const borderless = blockStyle?.borderless;
+  const bgColor = blockStyle?.background_color;
+  const borderClass = withBorder && !borderless ? "border border-primary" : "";
+  const bgClass = bgColor ? "" : "bg-bg";
+  const dark = isDarkColor(bgColor);
+
   return (
     <div
-      className={`overflow-hidden rounded-[15px] bg-bg ${className ?? ""}`}
+      className={`overflow-hidden rounded-[15px] ${bgClass} ${borderClass} ${className ?? ""}`}
       style={{
         gridColumn: `${mobileLayout.colStart} / span ${mobileLayout.colSpan}`,
         gridRow: `${mobileLayout.rowStart} / span ${mobileLayout.rowSpan}`,
+        ...(bgColor ? { backgroundColor: bgColor } : {}),
+        ...(dark ? { color: "#eff1f3" } : {}),
       }}
     >
       {children}

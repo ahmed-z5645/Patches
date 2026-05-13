@@ -4,6 +4,8 @@ import { useCallback, useRef, useEffect } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { motion } from "framer-motion";
 import type { DesktopLayout, MobileLayout } from "@/lib/types/grid";
+import type { BlockStyle } from "@/lib/types/blocks";
+import { isDarkColor } from "@/lib/constants/colors";
 
 interface DraggableTileProps {
   id: string;
@@ -15,6 +17,10 @@ interface DraggableTileProps {
   className?: string;
   autoHeight?: boolean;
   zIndex?: number;
+  withBorder?: boolean;
+  blockStyle?: BlockStyle;
+  onSelect?: () => void;
+  isSelected?: boolean;
 }
 
 export function DraggableTile({
@@ -26,6 +32,10 @@ export function DraggableTile({
   className,
   autoHeight,
   zIndex,
+  withBorder,
+  blockStyle,
+  onSelect,
+  isSelected,
 }: DraggableTileProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id });
@@ -106,12 +116,36 @@ export function DraggableTile({
   // Define the master spring configuration so it can be perfectly matched
   const springConfig = { type: "spring" as const, stiffness: 200, damping: 18, mass: 1.2 };
 
+  const borderless = blockStyle?.borderless;
+  const bgColor = blockStyle?.background_color;
+  const borderClass =
+    withBorder && !borderless
+      ? isSelected
+        ? "border border-accent"
+        : "border border-primary"
+      : isSelected
+        ? "border border-accent"
+        : "";
+  const bgClass = bgColor ? "" : "bg-bg";
+  const dark = isDarkColor(bgColor);
+  const mergedStyle = {
+    ...style,
+    ...(bgColor ? { backgroundColor: bgColor } : {}),
+    ...(dark ? { color: "#eff1f3" } : {}),
+  };
+
   return (
     <motion.div
       ref={setNodeRef}
       layout // Always on to maintain layout projection context
-      style={style}
-      className={`group/tile relative ${autoHeight ? "" : "overflow-hidden"} rounded-[15px] bg-bg ${className ?? ""}`}
+      data-block-id={id}
+      style={mergedStyle}
+      onClick={(e) => {
+        if (!onSelect) return;
+        if ((e.target as HTMLElement).closest("button")) return;
+        onSelect();
+      }}
+      className={`group/tile relative ${autoHeight ? "" : "overflow-hidden"} rounded-[15px] ${bgClass} ${borderClass} ${className ?? ""}`}
       initial={{ opacity: 0, scale: 0.8 }}
       animate={{ 
         // Track the cursor perfectly during drag, animate to 0 when dropped
@@ -134,7 +168,7 @@ export function DraggableTile({
       <div
         {...listeners}
         {...attributes}
-        className="flex h-6 cursor-grab items-center justify-center border-b border-primary/30 active:cursor-grabbing"
+        className={`flex h-6 cursor-grab items-center justify-center active:cursor-grabbing ${borderless ? "" : "border-b border-primary/30"}`}
       >
         <div className="flex gap-0.5">
           <span className="size-1 rounded-full bg-text/20" />

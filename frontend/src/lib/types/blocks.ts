@@ -11,6 +11,11 @@ export type BlockType =
   | "code"
   | "weather";
 
+export interface BlockStyle {
+  background_color?: string | null;
+  borderless?: boolean;
+}
+
 export interface BaseBlock {
   id: string;
   post_id: string;
@@ -21,6 +26,7 @@ export interface BaseBlock {
   float_position: "left" | "right" | "center" | null;
   z_index: number;
   sort_order: number;
+  style?: BlockStyle;
   created_at: string;
   updated_at: string;
 }

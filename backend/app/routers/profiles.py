@@ -3,6 +3,7 @@ from supabase import Client
 from app.deps import get_db, get_authenticated_user
 from app.models.profiles import ProfileResponse, ProfileUpdate
 from app.auth import get_current_user as extract_user
+from app.services.weeks import is_revealed
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 
@@ -120,6 +121,8 @@ async def get_public_user_posts(
 
     result = []
     for post in posts.data or []:
+        if not is_owner and not is_revealed(post["week_number"], post["year"]):
+            continue
         blocks = (
             db.table("blocks")
             .select("*")

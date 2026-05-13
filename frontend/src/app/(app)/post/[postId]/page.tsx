@@ -98,7 +98,8 @@ export default function PostPage() {
             key={block.id}
             desktopLayout={block.grid_layout_desktop}
             mobileLayout={block.grid_layout_mobile}
-            className="border border-primary"
+            withBorder
+            blockStyle={block.style}
             autoHeight={block.type === "markdown"}
           >
             <BlockRenderer

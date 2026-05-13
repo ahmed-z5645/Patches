@@ -11,10 +11,12 @@ import {
   useDraggable,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import type { Block, Post } from "@/lib/types/blocks";
+import type { Block, BlockStyle, Post } from "@/lib/types/blocks";
+import { isDarkColor } from "@/lib/constants/colors";
 import type { MobileLayout } from "@/lib/types/grid";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { PostCard } from "@/components/feed/PostCard";
+import { COVER_COLORS } from "@/lib/constants/colors";
 
 interface PrepublishScreenProps {
   post: Post;
@@ -26,19 +28,6 @@ interface PrepublishScreenProps {
   onMobileLayoutChange: (blockId: string, changes: Partial<MobileLayout>) => void;
 }
 
-const COVER_COLORS = [
-  "#223843",
-  "#fb5012",
-  "#d8b4a0",
-  "#dbd3d8",
-  "#4a7c59",
-  "#6b5b95",
-  "#e8a87c",
-  "#41b3a3",
-  "#c38d9e",
-  "#659dbd",
-];
-
 function PreviewDraggableTile({
   id,
   layout,
@@ -46,6 +35,7 @@ function PreviewDraggableTile({
   onResize,
   children,
   autoHeight,
+  blockStyle,
 }: {
   id: string;
   layout: MobileLayout;
@@ -53,6 +43,7 @@ function PreviewDraggableTile({
   onResize: (id: string, changes: Partial<MobileLayout>) => void;
   children: React.ReactNode;
   autoHeight?: boolean;
+  blockStyle?: BlockStyle;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id });
@@ -122,13 +113,21 @@ function PreviewDraggableTile({
     [id, layout, gridMeta, onResize]
   );
 
+  const borderless = blockStyle?.borderless;
+  const bgColor = blockStyle?.background_color;
+  const dark = isDarkColor(bgColor);
   const style = {
     gridColumn: `${layout.colStart} / span ${layout.colSpan}`,
     gridRow: `${layout.rowStart} / span ${layout.rowSpan}`,
     x: transform?.x ?? 0,
     y: transform?.y ?? 0,
     zIndex: isDragging ? 50 : undefined,
+    ...(bgColor ? { backgroundColor: bgColor } : {}),
+    ...(dark ? { color: "#eff1f3" } : {}),
   };
+  const tileBgClass = bgColor ? "" : "bg-bg";
+  const tileBorderClass = borderless ? "" : "border border-primary/50";
+  const handleBorderClass = borderless ? "" : "border-b border-primary/20";
 
   return (
     <motion.div
@@ -137,13 +136,13 @@ function PreviewDraggableTile({
       style={style}
       animate={{ opacity: isDragging ? 0.7 : 1, scale: isDragging ? 1.03 : 1 }}
       transition={{ duration: 0.15, x: { duration: 0 }, y: { duration: 0 }, scale: { type: "spring", stiffness: 300, damping: 15 }, layout: { type: "spring", stiffness: 200, damping: 18, mass: 1.2 } }}
-      className={`group/tile relative ${autoHeight ? "" : "overflow-hidden"} rounded-[8px] border border-primary/50 bg-bg`}
+      className={`group/tile relative ${autoHeight ? "" : "overflow-hidden"} rounded-[8px] ${tileBorderClass} ${tileBgClass}`}
     >
       <div
         {...listeners}
         {...attributes}
         style={{ touchAction: "none" }}
-        className="flex h-4 cursor-grab items-center justify-center border-b border-primary/20 active:cursor-grabbing"
+        className={`flex h-4 cursor-grab items-center justify-center active:cursor-grabbing ${handleBorderClass}`}
       >
         <div className="flex gap-px">
           <span className="size-[3px] rounded-full bg-text/20" />
@@ -286,6 +285,7 @@ function MobilePhonePreview({
                   gridMeta={gridMeta}
                   onResize={onLayoutChange}
                   autoHeight={block.type === "markdown"}
+                  blockStyle={block.style}
                 >
                   <div className="pointer-events-none h-full overflow-hidden">
                     <div style={{ width: "142.86%", height: "142.86%", transform: "scale(0.7)", transformOrigin: "top left" }}>
