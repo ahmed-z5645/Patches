@@ -3,7 +3,7 @@ from supabase import Client
 from app.deps import get_db, get_authenticated_user
 from app.models.posts import PostResponse, PostCreate, PostUpdate
 from app.services.posts import calculate_word_count
-from app.services.weeks import get_edition_week, is_late_for_week
+from app.services.weeks import get_edition_week, is_late_for_week, can_target_week
 from datetime import datetime, timedelta, timezone
 
 router = APIRouter(prefix="/api/posts", tags=["posts"])
@@ -25,6 +25,12 @@ async def create_post(
     )
     if existing.data:
         return existing.data[0]
+
+    if not can_target_week(body.week_number, body.year):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot post for this week — it is outside the allowed window.",
+        )
 
     result = (
         db.table("posts")
@@ -111,21 +117,14 @@ async def get_editor_post(
     """
     Returns the post the editor should open, creating it if needed.
 
-    - Published this week      → next week's post
-    - Not published this week,
-      and previous week also
-      unpublished              → previous week's post (will be marked late on publish)
-    - Otherwise               → current week's post
+    - Current week not published → current week's post
+    - Current week published     → next week's post (pre-publish)
     """
     week, year = get_edition_week()
 
     if _has_published(db, user_id, week, year):
         next_week, next_year = _adjacent_week(week, year, 7)
         return _get_or_create(db, user_id, next_week, next_year)
-
-    prev_week, prev_year = _adjacent_week(week, year, -7)
-    if not _has_published(db, user_id, prev_week, prev_year):
-        return _get_or_create(db, user_id, prev_week, prev_year)
 
     return _get_or_create(db, user_id, week, year)
 
@@ -192,6 +191,12 @@ async def publish_post(
     post = db.table("posts").select("*").eq("id", post_id).single().execute()
     if not post.data or post.data["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="Post not found")
+
+    if not can_target_week(post.data["week_number"], post.data["year"]):
+        raise HTTPException(
+            status_code=400,
+            detail="This week is closed — it cannot be published.",
+        )
 
     if not post.data.get("title"):
         raise HTTPException(status_code=400, detail="Post must have a title")
