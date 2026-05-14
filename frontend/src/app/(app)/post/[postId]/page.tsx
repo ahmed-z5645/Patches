@@ -11,6 +11,7 @@ import { BentoGrid } from "@/components/bento/BentoGrid";
 import { BentoTile } from "@/components/bento/BentoTile";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { LateBadge } from "@/components/feed/LateBadge";
+import { EditorSplashScreen } from "@/components/editor/EditorSplashScreen";
 
 interface FullPost extends Post {
   blocks: Block[];
@@ -47,11 +48,7 @@ export default function PostPage() {
   }, [post?.blocks]);
 
   if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="size-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-      </div>
-    );
+    return <EditorSplashScreen />;
   }
 
   if (error || !post) {
