@@ -3,6 +3,7 @@ from supabase import Client
 from app.deps import get_db, get_authenticated_user
 from app.models.posts import PostResponse, PostCreate, PostUpdate
 from app.services.posts import calculate_word_count
+from app.services.feed import is_week_unlocked
 from app.services.weeks import get_edition_week, is_late_for_week, can_target_week, is_revealed
 from datetime import datetime, timedelta, timezone
 
@@ -137,7 +138,9 @@ async def get_post(
 ):
     result = (
         db.table("posts")
-        .select("*, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
+        .select(
+            "*, profiles!posts_user_id_fkey(username, display_name, avatar_url, is_public), blocks(*)"
+        )
         .eq("id", post_id)
         .single()
         .execute()
@@ -147,17 +150,29 @@ async def get_post(
     if result.data["user_id"] != user_id:
         if not result.data["is_published"]:
             raise HTTPException(status_code=403, detail="Not authorized")
-        if not is_revealed(result.data["week_number"], result.data["year"]):
+        author = result.data.get("profiles") or {}
+        if author.get("is_public") is False:
+            # Private account: viewer must be an accepted follower.
+            follow = (
+                db.table("follows")
+                .select("status")
+                .eq("follower_id", user_id)
+                .eq("following_id", result.data["user_id"])
+                .eq("status", "accepted")
+                .execute()
+            )
+            if not follow.data:
+                raise HTTPException(status_code=403, detail="Not authorized")
+        # Either the post is past its Monday-9-AM reveal, or the viewer
+        # unlocked the current week by publishing their own. Mirrors /api/feed.
+        wk, yr = result.data["week_number"], result.data["year"]
+        if not is_revealed(wk, yr) and not is_week_unlocked(db, user_id, wk, yr):
             raise HTTPException(status_code=403, detail="Post not yet released")
 
-    blocks = (
-        db.table("blocks")
-        .select("*")
-        .eq("post_id", post_id)
-        .order("sort_order")
-        .execute()
+    result.data["blocks"] = sorted(
+        result.data.get("blocks") or [],
+        key=lambda b: b.get("sort_order", 0),
     )
-    result.data["blocks"] = blocks.data or []
     return result.data
 
 

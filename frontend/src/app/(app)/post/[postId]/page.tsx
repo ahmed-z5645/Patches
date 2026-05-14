@@ -82,9 +82,12 @@ export default function PostPage() {
 
       <div className="flex items-center gap-3">
         {post.profiles?.username && (
-          <span className="text-sm text-text/40">
+          <Link
+            href={`/${post.profiles.username}`}
+            className="text-sm text-text/40 hover:text-accent"
+          >
             @{post.profiles.username}
-          </span>
+          </Link>
         )}
         {post.is_late && <LateBadge />}
         <span className="text-sm text-text/40">

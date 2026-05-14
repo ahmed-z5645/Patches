@@ -53,17 +53,83 @@ def test_get_current_week_post_creates_if_missing(client, mock_db):
 
 
 def test_get_post_by_owner(client, mock_db):
-    post_with_profile = {**SAMPLE_POST, "profiles": {"username": "testuser", "display_name": None, "avatar_url": None}}
-    mock_db.set_response([post_with_profile])   # get post
-    mock_db.set_response([SAMPLE_BLOCK])        # get blocks
+    post_with_profile = {
+        **SAMPLE_POST,
+        "profiles": {"username": "testuser", "display_name": None, "avatar_url": None},
+        "blocks": [SAMPLE_BLOCK],
+    }
+    mock_db.set_response([post_with_profile])
     r = client.get(f"/api/posts/{TEST_POST_ID}")
     assert r.status_code == 200
     assert "blocks" in r.json()
+    assert len(r.json()["blocks"]) == 1
 
 
 def test_get_post_unpublished_non_owner_forbidden(client, mock_db):
     other_post = {**SAMPLE_POST, "user_id": OTHER_USER_ID, "is_published": False, "profiles": None}
     mock_db.set_response([other_post])
+    r = client.get(f"/api/posts/{TEST_POST_ID}")
+    assert r.status_code == 403
+
+
+def test_get_post_private_author_non_follower_forbidden(client, mock_db):
+    # Published post on a private account; viewer does NOT follow → 403
+    other_post = {
+        **PUBLISHED_POST,
+        "user_id": OTHER_USER_ID,
+        "week_number": _CW, "year": _CY,
+        "profiles": {"username": "priv", "display_name": None, "avatar_url": None, "is_public": False},
+        "blocks": [],
+    }
+    mock_db.set_response([other_post])
+    mock_db.set_response([])  # follows lookup → no accepted relationship
+    r = client.get(f"/api/posts/{TEST_POST_ID}")
+    assert r.status_code == 403
+
+
+def test_get_post_private_author_accepted_follower_allowed(client, mock_db):
+    # Same setup, but viewer IS an accepted follower → allowed (also unlocked
+    # for current week so reveal check passes).
+    other_post = {
+        **PUBLISHED_POST,
+        "user_id": OTHER_USER_ID,
+        "week_number": _CW, "year": _CY,
+        "profiles": {"username": "priv", "display_name": None, "avatar_url": None, "is_public": False},
+        "blocks": [],
+    }
+    mock_db.set_response([other_post])
+    mock_db.set_response([{"status": "accepted"}])    # follow exists
+    mock_db.set_response([{"id": "viewer-post"}])     # is_week_unlocked → yes
+    r = client.get(f"/api/posts/{TEST_POST_ID}")
+    assert r.status_code == 200
+
+
+def test_get_post_public_author_current_week_viewer_unlocked_allowed(client, mock_db):
+    # Public account, current week (unrevealed), viewer has published → allowed.
+    other_post = {
+        **PUBLISHED_POST,
+        "user_id": OTHER_USER_ID,
+        "week_number": _CW, "year": _CY,
+        "profiles": {"username": "pub", "display_name": None, "avatar_url": None, "is_public": True},
+        "blocks": [],
+    }
+    mock_db.set_response([other_post])
+    mock_db.set_response([{"id": "viewer-post"}])    # is_week_unlocked → yes
+    r = client.get(f"/api/posts/{TEST_POST_ID}")
+    assert r.status_code == 200
+
+
+def test_get_post_public_author_current_week_viewer_locked_forbidden(client, mock_db):
+    # Public account, current week (unrevealed), viewer has NOT published → 403.
+    other_post = {
+        **PUBLISHED_POST,
+        "user_id": OTHER_USER_ID,
+        "week_number": _CW, "year": _CY,
+        "profiles": {"username": "pub", "display_name": None, "avatar_url": None, "is_public": True},
+        "blocks": [],
+    }
+    mock_db.set_response([other_post])
+    mock_db.set_response([])    # is_week_unlocked → no
     r = client.get(f"/api/posts/{TEST_POST_ID}")
     assert r.status_code == 403
 

@@ -21,13 +21,11 @@ POST_WITH_PROFILE = {
 # ---------------------------------------------------------------------------
 
 def test_feed_locked_when_user_has_not_published(client, mock_db):
-    # is_week_unlocked → no published post for current user
-    mock_db.set_response([])
-    # following IDs
-    mock_db.set_response(FOLLOWING_ROW)
-    # post count from followed users
+    # New query order: following → is_week_unlocked → post count
+    mock_db.set_response(FOLLOWING_ROW)                    # following
+    mock_db.set_response([])                               # is_week_unlocked → none
     from tests.conftest import MockResponse
-    mock_db._responses.append(MockResponse(data=[], count=2))
+    mock_db._responses.append(MockResponse(data=[], count=2))  # post count
 
     r = client.get("/api/feed")
     assert r.status_code == 200
@@ -38,30 +36,24 @@ def test_feed_locked_when_user_has_not_published(client, mock_db):
 
 
 def test_feed_unlocked_when_user_has_published(client, mock_db):
-    # is_week_unlocked → has published post
-    mock_db.set_response([{"id": TEST_POST_ID}])
-    # get_feed_posts: following IDs
+    # New: following → is_week_unlocked → posts (with blocks embedded)
     mock_db.set_response(FOLLOWING_ROW)
-    # get_feed_posts: posts from followed users
-    mock_db.set_response([POST_WITH_PROFILE])
-    # blocks for that post
-    mock_db.set_response([SAMPLE_BLOCK])
+    mock_db.set_response([{"id": TEST_POST_ID}])
+    mock_db.set_response([{**POST_WITH_PROFILE, "blocks": [SAMPLE_BLOCK]}])
 
     r = client.get("/api/feed")
     assert r.status_code == 200
     body = r.json()
     assert body["locked"] is False
     assert len(body["posts"]) == 1
+    assert len(body["posts"][0]["blocks"]) == 1
 
 
 def test_feed_past_week_always_unlocked(client, mock_db):
-    # year=2025 is guaranteed past — is_past_week returns True, skips unlock check
-    # get_feed_posts: following IDs
+    # year=2025 → is_past_week True, skips unlock check.
+    # New: following → posts (with blocks embedded)
     mock_db.set_response(FOLLOWING_ROW)
-    # posts
-    mock_db.set_response([POST_WITH_PROFILE])
-    # blocks
-    mock_db.set_response([SAMPLE_BLOCK])
+    mock_db.set_response([{**POST_WITH_PROFILE, "blocks": [SAMPLE_BLOCK]}])
 
     r = client.get("/api/feed?week=1&year=2025")
     assert r.status_code == 200
@@ -72,10 +64,9 @@ def test_feed_past_week_always_unlocked(client, mock_db):
 
 
 def test_feed_locked_no_following(client, mock_db):
-    # is_week_unlocked → no published post
-    mock_db.set_response([])
-    # following IDs → empty
-    mock_db.set_response([])
+    # New: following → (empty) → is_week_unlocked → return locked with 0
+    mock_db.set_response([])             # following → empty
+    mock_db.set_response([])             # is_week_unlocked → none
 
     r = client.get("/api/feed")
     assert r.status_code == 200
@@ -89,12 +80,9 @@ def test_feed_locked_no_following(client, mock_db):
 # ---------------------------------------------------------------------------
 
 def test_feed_older_returns_past_posts(client, mock_db):
-    # following IDs
+    # New: following → posts (with blocks embedded)
     mock_db.set_response(FOLLOWING_ROW)
-    # all posts (past week: year < current)
-    mock_db.set_response([POST_WITH_PROFILE])
-    # blocks for the post
-    mock_db.set_response([SAMPLE_BLOCK])
+    mock_db.set_response([{**POST_WITH_PROFILE, "blocks": [SAMPLE_BLOCK]}])
 
     r = client.get("/api/feed/older?offset=0&limit=6")
     assert r.status_code == 200
@@ -116,16 +104,11 @@ def test_feed_older_no_following_returns_empty(client, mock_db):
 # ---------------------------------------------------------------------------
 
 def test_feed_archive_grouped_by_week(client, mock_db):
-    # following IDs
+    # New: following → posts (with blocks embedded)
     mock_db.set_response(FOLLOWING_ROW)
-    # past posts (year 2025 < current year 2026)
-    post_a = {**POST_WITH_PROFILE, "id": "post-a", "week_number": 2, "year": 2025}
-    post_b = {**POST_WITH_PROFILE, "id": "post-b", "week_number": 3, "year": 2025}
+    post_a = {**POST_WITH_PROFILE, "id": "post-a", "week_number": 2, "year": 2025, "blocks": []}
+    post_b = {**POST_WITH_PROFILE, "id": "post-b", "week_number": 3, "year": 2025, "blocks": []}
     mock_db.set_response([post_a, post_b])
-    # blocks for post_a
-    mock_db.set_response([])
-    # blocks for post_b
-    mock_db.set_response([])
 
     r = client.get("/api/feed/archive")
     assert r.status_code == 200
@@ -146,15 +129,15 @@ def test_feed_archive_no_following_returns_empty(client, mock_db):
 # ---------------------------------------------------------------------------
 
 def test_feed_my_posts(client, mock_db):
-    my_post = {**PUBLISHED_POST, "user_id": TEST_USER_ID}
+    my_post = {**PUBLISHED_POST, "user_id": TEST_USER_ID, "blocks": [SAMPLE_BLOCK]}
     mock_db.set_response([my_post])
-    mock_db.set_response([SAMPLE_BLOCK])
 
     r = client.get("/api/feed/my-posts")
     assert r.status_code == 200
     body = r.json()
     assert len(body["posts"]) == 1
     assert body["posts"][0]["user_id"] == TEST_USER_ID
+    assert len(body["posts"][0]["blocks"]) == 1
 
 
 def test_feed_my_posts_empty(client, mock_db):
@@ -182,12 +165,15 @@ def _block(block_id, sort_order, post_id=None):
 
 
 def test_feed_unlocked_blocks_sorted_by_sort_order(client, mock_db):
-    # Mock returns blocks in REVERSE sort order to prove the endpoint
-    # (or its post-processing) re-sorts before returning.
-    mock_db.set_response([{"id": TEST_POST_ID}])           # is_week_unlocked
+    # New: blocks embedded in the post response, in reverse order — endpoint
+    # must Python-sort them ascending before returning.
     mock_db.set_response(FOLLOWING_ROW)                    # following
-    mock_db.set_response([POST_WITH_PROFILE])              # posts
-    mock_db.set_response([_block("b2", 2), _block("b0", 0), _block("b1", 1)])
+    mock_db.set_response([{"id": TEST_POST_ID}])           # is_week_unlocked
+    embedded_post = {
+        **POST_WITH_PROFILE,
+        "blocks": [_block("b2", 2), _block("b0", 0), _block("b1", 1)],
+    }
+    mock_db.set_response([embedded_post])
 
     r = client.get("/api/feed")
     assert r.status_code == 200
@@ -197,9 +183,12 @@ def test_feed_unlocked_blocks_sorted_by_sort_order(client, mock_db):
 
 
 def test_feed_my_posts_blocks_sorted(client, mock_db):
-    my_post = {**PUBLISHED_POST, "user_id": TEST_USER_ID}
+    my_post = {
+        **PUBLISHED_POST,
+        "user_id": TEST_USER_ID,
+        "blocks": [_block("b1", 1), _block("b0", 0)],
+    }
     mock_db.set_response([my_post])
-    mock_db.set_response([_block("b1", 1), _block("b0", 0)])
     r = client.get("/api/feed/my-posts")
     assert r.status_code == 200
     blocks = r.json()["posts"][0]["blocks"]
@@ -208,18 +197,19 @@ def test_feed_my_posts_blocks_sorted(client, mock_db):
 
 def test_feed_archive_each_post_has_blocks_in_order(client, mock_db):
     mock_db.set_response(FOLLOWING_ROW)
-    post_a = {**POST_WITH_PROFILE, "id": "post-a", "week_number": 2, "year": 2025}
-    post_b = {**POST_WITH_PROFILE, "id": "post-b", "week_number": 3, "year": 2025}
+    post_a = {
+        **POST_WITH_PROFILE, "id": "post-a", "week_number": 2, "year": 2025,
+        "blocks": [_block("a1", 1, "post-a"), _block("a0", 0, "post-a")],
+    }
+    post_b = {
+        **POST_WITH_PROFILE, "id": "post-b", "week_number": 3, "year": 2025,
+        "blocks": [_block("b0", 0, "post-b")],
+    }
     mock_db.set_response([post_a, post_b])
-    # Pre-refactor: blocks fetched per post → two separate responses, each
-    # already-ordered by the DB. Pin that each post ends up with a blocks list.
-    mock_db.set_response([_block("a1", 1, "post-a"), _block("a0", 0, "post-a")])
-    mock_db.set_response([_block("b0", 0, "post-b")])
 
     r = client.get("/api/feed/archive")
     assert r.status_code == 200
     weeks = r.json()["weeks"]
-    # Both posts present, each with blocks attached
     all_posts = [p for w in weeks for p in w["posts"]]
     assert len(all_posts) == 2
     for p in all_posts:
@@ -230,16 +220,12 @@ def test_feed_archive_each_post_has_blocks_in_order(client, mock_db):
 
 
 def test_feed_older_pagination_has_more_true(client, mock_db):
-    # 4 past posts; limit=2, offset=0 → has_more should be True
     posts = [
-        {**POST_WITH_PROFILE, "id": f"p{i}", "week_number": 1, "year": 2025}
+        {**POST_WITH_PROFILE, "id": f"p{i}", "week_number": 1, "year": 2025, "blocks": []}
         for i in range(4)
     ]
     mock_db.set_response(FOLLOWING_ROW)
     mock_db.set_response(posts)
-    # blocks for the 2 returned posts
-    mock_db.set_response([])
-    mock_db.set_response([])
     r = client.get("/api/feed/older?offset=0&limit=2")
     assert r.status_code == 200
     body = r.json()
@@ -249,14 +235,11 @@ def test_feed_older_pagination_has_more_true(client, mock_db):
 
 def test_feed_older_pagination_has_more_false_on_last_page(client, mock_db):
     posts = [
-        {**POST_WITH_PROFILE, "id": f"p{i}", "week_number": 1, "year": 2025}
+        {**POST_WITH_PROFILE, "id": f"p{i}", "week_number": 1, "year": 2025, "blocks": []}
         for i in range(3)
     ]
     mock_db.set_response(FOLLOWING_ROW)
     mock_db.set_response(posts)
-    mock_db.set_response([])  # blocks for p0
-    mock_db.set_response([])  # blocks for p1
-    mock_db.set_response([])  # blocks for p2
     r = client.get("/api/feed/older?offset=0&limit=6")
     assert r.status_code == 200
     body = r.json()
@@ -265,11 +248,11 @@ def test_feed_older_pagination_has_more_false_on_last_page(client, mock_db):
 
 
 def test_feed_locked_post_count_matches_followers_published_count(client, mock_db):
-    # User hasn't published → locked. Followed users have 2 published posts.
-    mock_db.set_response([])                  # is_week_unlocked → none
-    mock_db.set_response(FOLLOWING_ROW)       # following
+    # New order: following → is_week_unlocked → post count
+    mock_db.set_response(FOLLOWING_ROW)
+    mock_db.set_response([])
     from tests.conftest import MockResponse
-    mock_db._responses.append(MockResponse(data=[], count=2))  # post count
+    mock_db._responses.append(MockResponse(data=[], count=2))
     r = client.get("/api/feed")
     body = r.json()
     assert body["locked"] is True

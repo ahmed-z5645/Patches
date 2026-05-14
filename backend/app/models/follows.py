@@ -14,4 +14,5 @@ class FollowerProfile(BaseModel):
     username: str
     display_name: str | None = None
     avatar_url: str | None = None
+    avatar_color: str | None = None
     is_following_back: bool = False

@@ -10,6 +10,7 @@ interface Actor {
   username: string;
   display_name: string | null;
   avatar_url: string | null;
+  avatar_color: string | null;
 }
 
 interface Notification {
@@ -27,7 +28,10 @@ interface FollowRequest {
   username: string;
   display_name: string | null;
   avatar_url: string | null;
+  avatar_color: string | null;
 }
+
+const DEFAULT_AVATAR_COLOR = "#223843";
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -129,7 +133,10 @@ export default function NotificationsPage() {
                   href={`/${req.username}`}
                   className="flex items-center gap-3"
                 >
-                  <div className="size-10 rounded-full bg-primary" />
+                  <div
+                    className="size-10 rounded-full"
+                    style={{ backgroundColor: req.avatar_color || DEFAULT_AVATAR_COLOR }}
+                  />
                   <div>
                     <p className="text-sm font-medium">
                       {req.display_name || req.username}
@@ -180,7 +187,10 @@ export default function NotificationsPage() {
                 }`}
               >
                 <Link href={`/${notif.actor?.username || ""}`}>
-                  <div className="size-10 shrink-0 rounded-full bg-primary" />
+                  <div
+                    className="size-10 shrink-0 rounded-full"
+                    style={{ backgroundColor: notif.actor?.avatar_color || DEFAULT_AVATAR_COLOR }}
+                  />
                 </Link>
                 <div className="flex-1 text-sm">
                   <Link
