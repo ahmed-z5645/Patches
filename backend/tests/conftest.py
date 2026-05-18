@@ -41,6 +41,7 @@ class MockQueryBuilder:
         self._client = client
         self._table = table_name
         self._single = False
+        self._order: list[tuple[str, bool]] = []
 
     # --- chainable filters (all return self) ---
     def select(self, *args, **kwargs): return self
@@ -49,7 +50,11 @@ class MockQueryBuilder:
     def in_(self, col, vals): return self
     def is_(self, col, val): return self
     def not_(self, col, op, val): return self
-    def order(self, col, **kwargs): return self
+    def order(self, col, **kwargs):
+        # Track ordering so execute() can sort the mocked data, matching
+        # how real PostgREST applies .order() server-side.
+        self._order.append((col, bool(kwargs.get("desc", False))))
+        return self
     def range(self, start, end): return self
     def limit(self, n): return self
 
@@ -77,6 +82,13 @@ class MockQueryBuilder:
 
     def execute(self):
         resp = self._client._pop_response()
+        if self._order and isinstance(resp.data, list) and resp.data:
+            for col, desc in reversed(self._order):
+                resp.data = sorted(
+                    resp.data,
+                    key=lambda row, c=col: (row.get(c) is None, row.get(c)),
+                    reverse=desc,
+                )
         if self._single and isinstance(resp.data, list):
             resp.data = resp.data[0] if resp.data else None
         return resp

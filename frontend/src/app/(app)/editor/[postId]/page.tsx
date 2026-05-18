@@ -8,22 +8,16 @@ import type { Post, Block } from "@/lib/types/blocks";
 import { EditorCanvas } from "@/components/editor/EditorCanvas";
 import { EditorSplashScreen } from "@/components/editor/EditorSplashScreen";
 
+type PostWithBlocks = Post & { blocks: Block[] };
+
 export default function EditorPostPage() {
   const { postId } = useParams<{ postId: string }>();
 
-  const { data: post, error: postError } = useQuery({
+  const { data: post, error } = useQuery({
     queryKey: keys.post(postId),
-    queryFn: () => api.get<Post>(`/api/posts/${postId}`),
+    queryFn: () => api.get<PostWithBlocks>(`/api/posts/${postId}`),
     enabled: !!postId,
   });
-
-  const { data: blocks, error: blocksError } = useQuery({
-    queryKey: keys.postBlocks(postId),
-    queryFn: () => api.get<Block[]>(`/api/posts/${postId}/blocks`),
-    enabled: !!postId,
-  });
-
-  const error = postError || blocksError;
 
   if (error) {
     return (
@@ -35,9 +29,9 @@ export default function EditorPostPage() {
     );
   }
 
-  if (!post || !blocks) {
+  if (!post) {
     return <EditorSplashScreen />;
   }
 
-  return <EditorCanvas post={post} initialBlocks={blocks} />;
+  return <EditorCanvas post={post} initialBlocks={post.blocks ?? []} />;
 }

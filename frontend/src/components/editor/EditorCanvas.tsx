@@ -260,7 +260,6 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
       }
 
       queryClient.invalidateQueries({ queryKey: keys.post(post.id) });
-      queryClient.invalidateQueries({ queryKey: keys.postBlocks(post.id) });
     } catch (e) {
       console.error("Failed to save:", e);
     } finally {

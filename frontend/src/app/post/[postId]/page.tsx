@@ -11,6 +11,7 @@ import { BentoGrid } from "@/components/bento/BentoGrid";
 import { BentoTile } from "@/components/bento/BentoTile";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { LateBadge } from "@/components/feed/LateBadge";
+import { EditorSplashScreen } from "@/components/editor/EditorSplashScreen";
 
 interface FullPost extends Post {
   blocks: Block[];
@@ -47,11 +48,7 @@ export default function PostPage() {
   }, [post?.blocks]);
 
   if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="size-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-      </div>
-    );
+    return <EditorSplashScreen />;
   }
 
   if (error || !post) {
@@ -60,8 +57,8 @@ export default function PostPage() {
         <h1 className="font-[family-name:var(--font-cabinet)] text-2xl font-bold">
           Post not found
         </h1>
-        <Link href="/feed" className="text-sm text-accent underline">
-          Back to feed
+        <Link href="/" className="text-sm text-accent underline">
+          Go home
         </Link>
       </div>
     );
@@ -70,10 +67,10 @@ export default function PostPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <Link
-        href="/feed"
+        href={post.profiles?.username ? `/${post.profiles.username}` : "/"}
         className="inline-block text-sm text-text/40 hover:text-text/60"
       >
-        &larr; Back to feed
+        &larr; {post.profiles?.username ? `@${post.profiles.username}` : "Home"}
       </Link>
 
       <h1 className="w-full font-[family-name:var(--font-cabinet)] text-[48px] font-bold leading-tight md:text-[64px]">
@@ -82,9 +79,12 @@ export default function PostPage() {
 
       <div className="flex items-center gap-3">
         {post.profiles?.username && (
-          <span className="text-sm text-text/40">
+          <Link
+            href={`/${post.profiles.username}`}
+            className="text-sm text-text/40 hover:text-accent"
+          >
             @{post.profiles.username}
-          </span>
+          </Link>
         )}
         {post.is_late && <LateBadge />}
         <span className="text-sm text-text/40">

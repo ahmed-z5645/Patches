@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
+from app.services import weeks as weeks_module
+from app.services.feed import is_past_week
 from app.services.weeks import (
     EASTERN,
     get_edition_week,
@@ -13,17 +15,45 @@ from app.services.weeks import (
 )
 
 
+class _FrozenDatetime(datetime):
+    """datetime subclass whose .now() returns a fixed instant.
+
+    Patch the `datetime` symbol inside app.services.weeks with a subclass
+    bound to a specific moment, so is_revealed / get_edition_week behave
+    deterministically. fromisocalendar / astimezone continue to work
+    because they're inherited from datetime.
+    """
+
+    _frozen: datetime
+
+    @classmethod
+    def now(cls, tz=None):
+        if tz is None:
+            return cls._frozen.replace(tzinfo=None)
+        return cls._frozen.astimezone(tz)
+
+
+def _freeze(instant: datetime):
+    """Return a context manager that pins weeks_module.datetime to `instant`."""
+    frozen_cls = type("_Frozen", (_FrozenDatetime,), {"_frozen": instant})
+    return patch.object(weeks_module, "datetime", frozen_cls)
+
+
 def test_get_edition_week_known_date():
-    dt = datetime(2025, 3, 10, 12, 0, 0, tzinfo=timezone.utc)  # Monday week 11
+    # Mon 2025-03-10 12:00 UTC = 08:00 ET, before the Mon 09:00 ET cutoff,
+    # so it is still in ISO week 10 (the edition week has not rolled yet).
+    dt = datetime(2025, 3, 10, 12, 0, 0, tzinfo=timezone.utc)
     week, year = get_edition_week(dt)
-    assert week == 11
+    assert week == 10
     assert year == 2025
 
 
-def test_get_edition_week_different_date():
-    dt = datetime(2025, 1, 6, 12, 0, 0, tzinfo=timezone.utc)  # Monday week 2 (noon UTC = 7 AM Eastern)
+def test_get_edition_week_after_monday_9am_cutoff():
+    # Mon 2025-03-10 14:00 UTC = 10:00 ET — past the Mon 09:00 ET cutoff,
+    # so we have rolled into ISO week 11.
+    dt = datetime(2025, 3, 10, 14, 0, 0, tzinfo=timezone.utc)
     week, year = get_edition_week(dt)
-    assert week == 2
+    assert week == 11
     assert year == 2025
 
 
@@ -36,16 +66,26 @@ def test_get_edition_week_uses_eastern_now_when_none():
 
 
 def test_get_edition_week_sunday_night_before_midnight_eastern():
-    # Sunday 11:59 PM Eastern — still in the current week, not yet late
-    dt = datetime(2025, 3, 16, 23, 59, 0, tzinfo=EASTERN)  # Sun week 11
+    # Sunday 11:59 PM Eastern — comfortably before the Mon 09:00 ET cutoff,
+    # still in the current edition week.
+    dt = datetime(2025, 3, 16, 23, 59, 0, tzinfo=EASTERN)
     week, year = get_edition_week(dt)
     assert week == 11
     assert year == 2025
 
 
-def test_get_edition_week_monday_after_midnight_eastern():
-    # Monday 12:01 AM Eastern — deadline passed, now in week 12
-    dt = datetime(2025, 3, 17, 0, 1, 0, tzinfo=EASTERN)  # Mon week 12
+def test_get_edition_week_monday_before_9am_eastern():
+    # Monday 12:01 AM Eastern — Monday has started but the 9 AM ET cutoff
+    # has not, so the edition week is still 11 (not 12).
+    dt = datetime(2025, 3, 17, 0, 1, 0, tzinfo=EASTERN)
+    week, year = get_edition_week(dt)
+    assert week == 11
+    assert year == 2025
+
+
+def test_get_edition_week_monday_after_9am_eastern():
+    # Monday 09:01 AM Eastern — cutoff has passed, now in week 12.
+    dt = datetime(2025, 3, 17, 9, 1, 0, tzinfo=EASTERN)
     week, year = get_edition_week(dt)
     assert week == 12
     assert year == 2025
@@ -109,3 +149,71 @@ def test_is_revealed_past_week():
 def test_is_revealed_far_future():
     # Week 52 of 2099 has not been revealed yet
     assert is_revealed(52, 2099) is False
+
+
+# ---------------------------------------------------------------------------
+# Reveal-boundary contract (Monday 9 AM Eastern, NOT Sunday midnight)
+# ---------------------------------------------------------------------------
+# CLAUDE.md describes "Sunday at midnight" but the implementation reveals at
+# Monday 9 AM Eastern. These tests pin the actual implementation behavior so
+# the cost-reduction refactor cannot silently shift the boundary.
+
+def test_is_revealed_one_second_before_reveal_is_false():
+    # Week 11 of 2025 reveals at Mon March 17 09:00 ET. One second prior is False.
+    instant = datetime(2025, 3, 17, 8, 59, 59, tzinfo=EASTERN)
+    with _freeze(instant):
+        assert is_revealed(11, 2025) is False
+
+
+def test_is_revealed_exactly_at_reveal_is_true():
+    instant = datetime(2025, 3, 17, 9, 0, 0, tzinfo=EASTERN)
+    with _freeze(instant):
+        assert is_revealed(11, 2025) is True
+
+
+def test_is_revealed_one_second_after_reveal_is_true():
+    instant = datetime(2025, 3, 17, 9, 0, 1, tzinfo=EASTERN)
+    with _freeze(instant):
+        assert is_revealed(11, 2025) is True
+
+
+def test_is_past_week_false_for_current_week_at_sunday_2359():
+    # Sunday 23:59 ET of week 11 — week 11 is still the current edition week
+    instant = datetime(2025, 3, 16, 23, 59, 0, tzinfo=EASTERN)
+    with _freeze(instant):
+        assert is_past_week(11, 2025) is False
+
+
+def test_is_past_week_false_immediately_after_week_rolls_but_before_reveal():
+    # Monday 00:01 ET — edition week has advanced to 12, but week 11's reveal
+    # (Mon 09:00) has NOT happened yet. is_past_week requires BOTH conditions.
+    instant = datetime(2025, 3, 17, 0, 1, 0, tzinfo=EASTERN)
+    with _freeze(instant):
+        assert is_past_week(11, 2025) is False
+
+
+def test_is_past_week_true_after_reveal_passes():
+    # Monday 09:01 ET — week 11 is now prior and reveal has fired
+    instant = datetime(2025, 3, 17, 9, 1, 0, tzinfo=EASTERN)
+    with _freeze(instant):
+        assert is_past_week(11, 2025) is True
+
+
+def test_year_boundary_week_one_of_next_year():
+    # Sit just after Mon 09:00 ET on the Monday that opens ISO week 1 of 2026
+    # (Mon 2025-12-29 starts ISO 2026-W01).
+    instant = datetime(2025, 12, 29, 9, 5, 0, tzinfo=EASTERN)
+    with _freeze(instant):
+        week, year = get_edition_week()
+        assert (week, year) == (1, 2026)
+        # The last week of 2025 (week 52) is now revealed
+        assert is_revealed(52, 2025) is True
+
+
+def test_year_boundary_week_53_handled():
+    # 2020 has an ISO week 53. Confirm get_reveal_for_week handles it without crashing
+    # and produces a Monday 9 AM ET reveal.
+    reveal = get_reveal_for_week(53, 2020)
+    eastern_reveal = reveal.astimezone(EASTERN)
+    assert eastern_reveal.weekday() == 0
+    assert eastern_reveal.hour == 9

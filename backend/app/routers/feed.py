@@ -2,7 +2,14 @@ from fastapi import APIRouter, Depends, Query
 from supabase import Client
 from app.deps import get_db, get_authenticated_user
 from app.services.weeks import get_edition_week
-from app.services.feed import is_week_unlocked, is_past_week, get_feed_posts
+from app.services.feed import (
+    POST_WITH_BLOCKS_SELECT,
+    attach_sorted_blocks,
+    get_feed_posts,
+    get_following_ids,
+    is_past_week,
+    is_week_unlocked,
+)
 
 router = APIRouter(prefix="/api/feed", tags=["feed"])
 
@@ -17,20 +24,13 @@ async def get_feed(
     if week is None or year is None:
         week, year = get_edition_week()
 
+    following_ids = get_following_ids(db, user_id)
+
     if is_past_week(week, year):
-        posts = get_feed_posts(db, user_id, week, year)
+        posts = get_feed_posts(db, following_ids, week, year)
         return {"locked": False, "posts": posts, "week": week, "year": year}
 
     if not is_week_unlocked(db, user_id, week, year):
-        following = (
-            db.table("follows")
-            .select("following_id")
-            .eq("follower_id", user_id)
-            .eq("status", "accepted")
-            .execute()
-        )
-        following_ids = [row["following_id"] for row in following.data or []]
-
         post_count = 0
         if following_ids:
             count_result = (
@@ -51,7 +51,7 @@ async def get_feed(
             "year": year,
         }
 
-    posts = get_feed_posts(db, user_id, week, year)
+    posts = get_feed_posts(db, following_ids, week, year)
     return {"locked": False, "posts": posts, "week": week, "year": year}
 
 
@@ -64,20 +64,13 @@ async def get_older_posts(
 ):
     current_week, current_year = get_edition_week()
 
-    following = (
-        db.table("follows")
-        .select("following_id")
-        .eq("follower_id", user_id)
-        .eq("status", "accepted")
-        .execute()
-    )
-    following_ids = [row["following_id"] for row in following.data or []]
+    following_ids = get_following_ids(db, user_id)
     if not following_ids:
         return {"posts": [], "has_more": False}
 
     all_posts = (
         db.table("posts")
-        .select("*, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
+        .select(POST_WITH_BLOCKS_SELECT)
         .eq("is_published", True)
         .in_("user_id", following_ids)
         .order("published_at", desc=True)
@@ -91,17 +84,7 @@ async def get_older_posts(
     ]
 
     page = past_posts[offset : offset + limit]
-
-    for post in page:
-        blocks = (
-            db.table("blocks")
-            .select("*")
-            .eq("post_id", post["id"])
-            .order("sort_order")
-            .execute()
-        )
-        post["blocks"] = blocks.data or []
-
+    attach_sorted_blocks(page)
     return {"posts": page, "has_more": offset + limit < len(past_posts)}
 
 
@@ -113,20 +96,13 @@ async def get_archive(
     """Get all past-week published posts from followed users, grouped by week."""
     current_week, current_year = get_edition_week()
 
-    following = (
-        db.table("follows")
-        .select("following_id")
-        .eq("follower_id", user_id)
-        .eq("status", "accepted")
-        .execute()
-    )
-    following_ids = [row["following_id"] for row in following.data or []]
+    following_ids = get_following_ids(db, user_id)
     if not following_ids:
         return {"weeks": []}
 
     posts = (
         db.table("posts")
-        .select("*, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
+        .select(POST_WITH_BLOCKS_SELECT)
         .eq("is_published", True)
         .in_("user_id", following_ids)
         .order("year", desc=True)
@@ -136,7 +112,7 @@ async def get_archive(
     )
 
     weeks: dict[str, dict] = {}
-    for post in posts.data or []:
+    for post in attach_sorted_blocks(posts.data or []):
         if post["year"] == current_year and post["week_number"] >= current_week:
             continue
         key = f"{post['year']}-{post['week_number']}"
@@ -146,15 +122,6 @@ async def get_archive(
                 "year": post["year"],
                 "posts": [],
             }
-
-        blocks = (
-            db.table("blocks")
-            .select("*")
-            .eq("post_id", post["id"])
-            .order("sort_order")
-            .execute()
-        )
-        post["blocks"] = blocks.data or []
         weeks[key]["posts"].append(post)
 
     return {"weeks": list(weeks.values())}
@@ -168,24 +135,11 @@ async def get_my_posts(
     """Get all of the current user's published posts."""
     posts = (
         db.table("posts")
-        .select("*")
+        .select("*, blocks(*)")
         .eq("user_id", user_id)
         .eq("is_published", True)
         .order("year", desc=True)
         .order("week_number", desc=True)
         .execute()
     )
-
-    result = []
-    for post in posts.data or []:
-        blocks = (
-            db.table("blocks")
-            .select("*")
-            .eq("post_id", post["id"])
-            .order("sort_order")
-            .execute()
-        )
-        post["blocks"] = blocks.data or []
-        result.append(post)
-
-    return {"posts": result}
+    return {"posts": attach_sorted_blocks(posts.data or [])}

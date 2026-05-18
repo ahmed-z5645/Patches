@@ -93,7 +93,7 @@ async def get_follow_requests(
 ):
     result = (
         db.table("follows")
-        .select("follower_id, profiles!follows_follower_id_fkey(id, username, display_name, avatar_url)")
+        .select("follower_id, profiles!follows_follower_id_fkey(id, username, display_name, avatar_url, avatar_color)")
         .eq("following_id", current_user)
         .eq("status", "pending")
         .execute()
@@ -168,7 +168,7 @@ async def get_followers(
 ):
     result = (
         db.table("follows")
-        .select("follower_id, profiles!follows_follower_id_fkey(id, username, display_name, avatar_url)")
+        .select("follower_id, profiles!follows_follower_id_fkey(id, username, display_name, avatar_url, avatar_color)")
         .eq("following_id", current_user)
         .eq("status", "accepted")
         .execute()
@@ -198,7 +198,7 @@ async def get_following(
 ):
     result = (
         db.table("follows")
-        .select("following_id, profiles!follows_following_id_fkey(id, username, display_name, avatar_url)")
+        .select("following_id, profiles!follows_following_id_fkey(id, username, display_name, avatar_url, avatar_color)")
         .eq("follower_id", current_user)
         .eq("status", "accepted")
         .execute()

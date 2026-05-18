@@ -38,13 +38,15 @@ export function ProfileClient({ profile }: { profile: Profile }) {
       const isOwner = user?.id === profile.id;
       setIsOwnProfile(isOwner);
 
+      let viewerFollowStatus: "accepted" | "pending" | null = null;
       if (user && !isOwner) {
         try {
           const res = await api.get<{ is_following: boolean; status: string | null }>(
             `/api/follows/check/${profile.id}`
           );
           setIsFollowing(res.is_following);
-          setFollowStatus(res.status as "accepted" | "pending" | null);
+          viewerFollowStatus = res.status as "accepted" | "pending" | null;
+          setFollowStatus(viewerFollowStatus);
         } catch {
           // not logged in
         }
@@ -52,25 +54,27 @@ export function ProfileClient({ profile }: { profile: Profile }) {
 
       if (isOwner) {
         try {
-          const [followers, following, myPosts] = await Promise.all([
-            api.get<unknown[]>("/api/follows/followers"),
-            api.get<unknown[]>("/api/follows/following"),
-            api.get<{ posts: unknown[] }>("/api/feed/my-posts"),
-          ]);
-          setFollowerCount(followers.length);
-          setFollowingCount(following.length);
-          setPosts(myPosts.posts || []);
-        } catch {
-          // failed
+          const stats = await api.get<{
+            followers: number;
+            following: number;
+            posts: unknown[];
+          }>("/api/profiles/me/stats");
+          setFollowerCount(stats.followers);
+          setFollowingCount(stats.following);
+          setPosts(stats.posts || []);
+        } catch (e) {
+          console.error("Failed to load stats:", e);
         }
-      } else if (profile.is_public) {
+      } else if (profile.is_public || viewerFollowStatus === "accepted") {
+        // Public profile, OR private profile that the viewer is an accepted
+        // follower of. Either way, load their posts.
         try {
           const res = await api.get<{ posts: unknown[] }>(
             `/api/profiles/${profile.id}/posts`
           );
           setPosts(res.posts || []);
-        } catch {
-          // failed
+        } catch (e) {
+          console.error("Failed to load posts:", e);
         }
       }
 

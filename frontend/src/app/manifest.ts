@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Edition",
-    short_name: "Edition",
+    name: "Patches",
+    short_name: "Patches",
     description: "Your personal legacy engine",
     start_url: "/feed",
     display: "standalone",

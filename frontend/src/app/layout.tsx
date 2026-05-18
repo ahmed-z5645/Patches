@@ -22,12 +22,12 @@ const cabinetGrotesk = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Edition",
+  title: "Patches",
   description: "Your personal legacy engine",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Edition",
+    title: "Patches",
   },
   other: {
     "mobile-web-app-capable": "yes",

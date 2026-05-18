@@ -48,3 +48,30 @@ def test_links_stripped():
     result = count_words_in_markdown(text)
     # brackets and parens stripped, words remain
     assert result >= 3
+
+
+# ---------------------------------------------------------------------------
+# 100-word publish-validation boundary
+# ---------------------------------------------------------------------------
+# These tests pin the boundary the publish endpoint enforces. Any refactor of
+# count_words_in_markdown must keep 99→invalid, 100/101→valid.
+
+def test_count_words_exactly_99():
+    text = " ".join(["word"] * 99)
+    assert count_words_in_markdown(text) == 99
+
+
+def test_count_words_exactly_100():
+    text = " ".join(["word"] * 100)
+    assert count_words_in_markdown(text) == 100
+
+
+def test_count_words_exactly_101():
+    text = " ".join(["word"] * 101)
+    assert count_words_in_markdown(text) == 101
+
+
+def test_count_words_with_markdown_formatting_preserves_count():
+    # Formatting characters should not inflate or shrink the count.
+    text = " ".join(["**word**"] * 100)
+    assert count_words_in_markdown(text) == 100

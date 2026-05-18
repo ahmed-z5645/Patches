@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { ProfileClient } from "./ProfileClient";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -12,7 +13,9 @@ interface Profile {
   avatar_color: string | null;
 }
 
-async function getProfile(username: string): Promise<Profile | null> {
+// cache() dedupes the fetch across generateMetadata and the page component
+// within a single request — drops profile loads from 2 → 1 per page view.
+const getProfile = cache(async (username: string): Promise<Profile | null> => {
   try {
     const res = await fetch(`${API_URL}/api/profiles/${username}`, {
       cache: "no-store",
@@ -22,7 +25,7 @@ async function getProfile(username: string): Promise<Profile | null> {
   } catch {
     return null;
   }
-}
+});
 
 export async function generateMetadata({
   params,
@@ -33,8 +36,8 @@ export async function generateMetadata({
   const profile = await getProfile(username);
   return {
     title: profile
-      ? `${profile.display_name || profile.username} — Edition`
-      : "Profile — Edition",
+      ? `${profile.display_name || profile.username} — Patches`
+      : "Profile — Patches",
   };
 }
 

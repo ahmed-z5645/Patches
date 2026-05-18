@@ -1,15 +1,8 @@
-import base64
 import json
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from cryptography.hazmat.primitives.serialization import (
-    Encoding,
-    NoEncryption,
-    PrivateFormat,
-)
-from py_vapid import Vapid
 from pywebpush import WebPushException, webpush
 from supabase import create_client
 from zoneinfo import ZoneInfo
@@ -22,21 +15,21 @@ logger = logging.getLogger(__name__)
 
 
 def _load_vapid_private_key() -> str:
-    """Convert stored base64-DER private key back to PEM for pywebpush."""
-    settings = get_settings()
-    raw = settings.vapid_private_key
+    """Return the VAPID private key PEM for pywebpush.
+
+    The key must be supplied as a PEM block ("-----BEGIN EC PRIVATE KEY-----").
+    Anything else disables push (logged) rather than raising.
+    """
+    raw = get_settings().vapid_private_key
     if not raw:
         return ""
     if raw.startswith("-----"):
-        return raw  # already PEM
-    # base64url-encoded DER → PEM
-    padding = "=" * ((4 - len(raw) % 4) % 4)
-    der = base64.urlsafe_b64decode(raw + padding)
-    v = Vapid()
-    v.load_key(der)
-    return v.private_key.private_bytes(
-        Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption()
-    ).decode()
+        return raw
+    logger.error(
+        "VAPID_PRIVATE_KEY is not PEM-formatted — push disabled. "
+        "Supply the key as a PEM block."
+    )
+    return ""
 
 
 def _send_push(subscription_info: dict, payload: dict) -> bool:

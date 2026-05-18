@@ -15,7 +15,7 @@ async def get_notifications(
 ):
     query = (
         db.table("notifications")
-        .select("*, profiles!notifications_actor_id_fkey(id, username, display_name, avatar_url)")
+        .select("*, profiles!notifications_actor_id_fkey(id, username, display_name, avatar_url, avatar_color)")
         .eq("user_id", current_user)
         .order("created_at", desc=True)
         .range(offset, offset + limit - 1)

@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 from app.deps import get_db, get_authenticated_user
+from app.auth import get_optional_user
 from app.models.posts import PostResponse, PostCreate, PostUpdate
 from app.services.posts import calculate_word_count
+from app.services.feed import is_week_unlocked
 from app.services.weeks import get_edition_week, is_late_for_week, can_target_week, is_revealed
 from datetime import datetime, timedelta, timezone
 
@@ -132,32 +134,51 @@ async def get_editor_post(
 @router.get("/{post_id}")
 async def get_post(
     post_id: str,
-    user_id: str = Depends(get_authenticated_user),
+    caller_id: str | None = Depends(get_optional_user),
     db: Client = Depends(get_db),
 ):
     result = (
         db.table("posts")
-        .select("*, profiles!posts_user_id_fkey(username, display_name, avatar_url)")
+        .select(
+            "*, profiles!posts_user_id_fkey(username, display_name, avatar_url, is_public), blocks(*)"
+        )
         .eq("id", post_id)
         .single()
         .execute()
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Post not found")
-    if result.data["user_id"] != user_id:
+    if result.data["user_id"] != caller_id:
         if not result.data["is_published"]:
             raise HTTPException(status_code=403, detail="Not authorized")
-        if not is_revealed(result.data["week_number"], result.data["year"]):
+        author = result.data.get("profiles") or {}
+        if author.get("is_public") is False:
+            # Private account: viewer must be a logged-in accepted follower.
+            if not caller_id:
+                raise HTTPException(status_code=403, detail="Not authorized")
+            follow = (
+                db.table("follows")
+                .select("status")
+                .eq("follower_id", caller_id)
+                .eq("following_id", result.data["user_id"])
+                .eq("status", "accepted")
+                .execute()
+            )
+            if not follow.data:
+                raise HTTPException(status_code=403, detail="Not authorized")
+        # Either the post is past its reveal, or a logged-in viewer unlocked
+        # the current week by publishing their own. Mirrors /api/feed. An
+        # anonymous viewer (caller_id is None) only ever sees revealed posts.
+        wk, yr = result.data["week_number"], result.data["year"]
+        if not is_revealed(wk, yr) and not (
+            caller_id and is_week_unlocked(db, caller_id, wk, yr)
+        ):
             raise HTTPException(status_code=403, detail="Post not yet released")
 
-    blocks = (
-        db.table("blocks")
-        .select("*")
-        .eq("post_id", post_id)
-        .order("sort_order")
-        .execute()
+    result.data["blocks"] = sorted(
+        result.data.get("blocks") or [],
+        key=lambda b: b.get("sort_order", 0),
     )
-    result.data["blocks"] = blocks.data or []
     return result.data
 
 
@@ -201,7 +222,7 @@ async def publish_post(
             detail="This week is closed — it cannot be published.",
         )
 
-    if not post.data.get("title"):
+    if not (post.data.get("title") or "").strip():
         raise HTTPException(status_code=400, detail="Post must have a title")
 
     word_count = calculate_word_count(db, post_id)
