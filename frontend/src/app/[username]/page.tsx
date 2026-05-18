@@ -36,8 +36,8 @@ export async function generateMetadata({
   const profile = await getProfile(username);
   return {
     title: profile
-      ? `${profile.display_name || profile.username} — Edition`
-      : "Profile — Edition",
+      ? `${profile.display_name || profile.username} — Patches`
+      : "Profile — Patches",
   };
 }
 

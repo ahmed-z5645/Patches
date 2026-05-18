@@ -38,7 +38,7 @@ The frontend uses Supabase Auth for authentication (session cookies managed via 
 
 - `(auth)/` route group — login, signup, callback (public, redirects to /feed if authed)
 - `(app)/` route group — feed, editor, archive, settings (protected, redirects to /login if not authed)
-- `[username]/` — Public legacy page (always public, bypasses social lock)
+- `[username]/` — Public legacy page (always reachable, bypasses the Toll; Sunday reveal still applies to non-owners)
 - Layout: vertical Sidebar on desktop (80px left rail), BottomTabBar on mobile
 
 ### FastAPI Backend
@@ -86,4 +86,4 @@ Key tables: `profiles`, `follows`, `posts`, `blocks`. Posts are keyed by `unique
 - Post validation: title required, word_count ≥ 100 across all markdown blocks
 - Grid row spans map to fractional heights: stored rowSpan / 2 = visual tile height
 - Mobile layout is user-defined, not auto-derived from desktop layout
-- Public profile pages (`/[username]`) bypass all social lock mechanics entirely
+- Public profile pages (`/[username]`) bypass the Toll (no publish-to-unlock required to view them), but the Sunday reveal embargo still applies to non-owners — anonymous and logged-in non-owner visitors only see weeks that have already revealed; the owner sees their own current-week post early

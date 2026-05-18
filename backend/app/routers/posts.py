@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 from app.deps import get_db, get_authenticated_user
+from app.auth import get_optional_user
 from app.models.posts import PostResponse, PostCreate, PostUpdate
 from app.services.posts import calculate_word_count
 from app.services.feed import is_week_unlocked
@@ -133,7 +134,7 @@ async def get_editor_post(
 @router.get("/{post_id}")
 async def get_post(
     post_id: str,
-    user_id: str = Depends(get_authenticated_user),
+    caller_id: str | None = Depends(get_optional_user),
     db: Client = Depends(get_db),
 ):
     result = (
@@ -147,26 +148,31 @@ async def get_post(
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Post not found")
-    if result.data["user_id"] != user_id:
+    if result.data["user_id"] != caller_id:
         if not result.data["is_published"]:
             raise HTTPException(status_code=403, detail="Not authorized")
         author = result.data.get("profiles") or {}
         if author.get("is_public") is False:
-            # Private account: viewer must be an accepted follower.
+            # Private account: viewer must be a logged-in accepted follower.
+            if not caller_id:
+                raise HTTPException(status_code=403, detail="Not authorized")
             follow = (
                 db.table("follows")
                 .select("status")
-                .eq("follower_id", user_id)
+                .eq("follower_id", caller_id)
                 .eq("following_id", result.data["user_id"])
                 .eq("status", "accepted")
                 .execute()
             )
             if not follow.data:
                 raise HTTPException(status_code=403, detail="Not authorized")
-        # Either the post is past its Monday-9-AM reveal, or the viewer
-        # unlocked the current week by publishing their own. Mirrors /api/feed.
+        # Either the post is past its reveal, or a logged-in viewer unlocked
+        # the current week by publishing their own. Mirrors /api/feed. An
+        # anonymous viewer (caller_id is None) only ever sees revealed posts.
         wk, yr = result.data["week_number"], result.data["year"]
-        if not is_revealed(wk, yr) and not is_week_unlocked(db, user_id, wk, yr):
+        if not is_revealed(wk, yr) and not (
+            caller_id and is_week_unlocked(db, caller_id, wk, yr)
+        ):
             raise HTTPException(status_code=403, detail="Post not yet released")
 
     result.data["blocks"] = sorted(

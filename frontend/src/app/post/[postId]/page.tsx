@@ -57,8 +57,8 @@ export default function PostPage() {
         <h1 className="font-[family-name:var(--font-cabinet)] text-2xl font-bold">
           Post not found
         </h1>
-        <Link href="/feed" className="text-sm text-accent underline">
-          Back to feed
+        <Link href="/" className="text-sm text-accent underline">
+          Go home
         </Link>
       </div>
     );
@@ -67,10 +67,10 @@ export default function PostPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <Link
-        href="/feed"
+        href={post.profiles?.username ? `/${post.profiles.username}` : "/"}
         className="inline-block text-sm text-text/40 hover:text-text/60"
       >
-        &larr; Back to feed
+        &larr; {post.profiles?.username ? `@${post.profiles.username}` : "Home"}
       </Link>
 
       <h1 className="w-full font-[family-name:var(--font-cabinet)] text-[48px] font-bold leading-tight md:text-[64px]">

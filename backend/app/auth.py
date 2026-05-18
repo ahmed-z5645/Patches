@@ -5,6 +5,7 @@ import httpx
 from app.config import get_settings, Settings
 
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 _jwks_cache: dict | None = None
 
@@ -64,3 +65,20 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
         )
+
+
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_security),
+    settings: Settings = Depends(get_settings),
+) -> str | None:
+    """Best-effort caller id for endpoints that serve anonymous visitors.
+
+    Returns the user id when a valid Bearer token is present, else None.
+    Never raises — callers branch on the None case explicitly.
+    """
+    if credentials is None:
+        return None
+    try:
+        return await get_current_user(credentials, settings=settings)
+    except HTTPException:
+        return None
