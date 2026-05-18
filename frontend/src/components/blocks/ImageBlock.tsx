@@ -3,8 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { ImageBlock as ImageBlockType } from "@/lib/types/blocks";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE_URL as API_URL } from "@/lib/api-url";
 
 interface ImageBlockProps {
   block: ImageBlockType;

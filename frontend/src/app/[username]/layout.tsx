@@ -1,8 +1,7 @@
 import { Sidebar } from "@/components/layout/Sidebar";
 import { BottomTabBar } from "@/components/layout/BottomTabBar";
 import { CountdownPill } from "@/components/layout/CountdownPill";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_BASE_URL as API_URL } from "@/lib/api-url";
 
 export default async function PublicProfileLayout({
   children,
