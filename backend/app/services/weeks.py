@@ -99,3 +99,35 @@ def can_target_week(week_number: int, year: int) -> bool:
     if (week_number, year) == (prev_w, prev_y):
         return not is_week_closed(week_number, year)
     return False
+
+
+def get_selectable_weeks() -> list[dict]:
+    """Returns the weeks a user may post for right now, each tagged with its role.
+
+    role is one of "missed" (prior week N-1, still in late grace), "current"
+    (this edition week N), or "next" (N+1, pre-publish). Filtered through
+    can_target_week() so a closed prior week never appears.
+    """
+    cw, cy = get_edition_week()
+    prev_w, prev_y = _shift_week(cw, cy, -1)
+    next_w, next_y = _shift_week(cw, cy, 1)
+    candidates = [
+        ("missed", prev_w, prev_y),
+        ("current", cw, cy),
+        ("next", next_w, next_y),
+    ]
+
+    weeks: list[dict] = []
+    for role, w, y in candidates:
+        if not can_target_week(w, y):
+            continue
+        weeks.append(
+            {
+                "role": role,
+                "week_number": w,
+                "year": y,
+                "is_late": is_late_for_week(w, y),
+                "unlocks_feed": role == "current",
+            }
+        )
+    return weeks

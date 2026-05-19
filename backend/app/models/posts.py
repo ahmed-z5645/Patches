@@ -27,3 +27,14 @@ class PostUpdate(BaseModel):
     title: str | None = None
     cover_color: str | None = None
     tags: list[str] | None = None
+
+
+class WeekOption(BaseModel):
+    role: str  # "missed" | "current" | "next"
+    week_number: int
+    year: int
+    is_late: bool
+    unlocks_feed: bool
+    has_post: bool
+    is_published: bool
+    post_id: str | None = None

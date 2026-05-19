@@ -9,6 +9,7 @@ from app.services.weeks import (
     get_edition_week,
     get_next_reveal,
     get_reveal_for_week,
+    get_selectable_weeks,
     is_late_for_week,
     is_revealed,
     time_until_reveal,
@@ -208,6 +209,49 @@ def test_year_boundary_week_one_of_next_year():
         assert (week, year) == (1, 2026)
         # The last week of 2025 (week 52) is now revealed
         assert is_revealed(52, 2025) is True
+
+
+# ---------------------------------------------------------------------------
+# get_selectable_weeks — the missed/current/next picker source
+# ---------------------------------------------------------------------------
+
+def test_get_selectable_weeks_offers_missed_current_next():
+    # Monday 09:01 AM ET = edition week 12 of 2025.
+    instant = datetime(2025, 3, 17, 9, 1, 0, tzinfo=EASTERN)
+    with _freeze(instant):
+        weeks = get_selectable_weeks()
+
+    assert [w["role"] for w in weeks] == ["missed", "current", "next"]
+    by_role = {w["role"]: w for w in weeks}
+    assert (by_role["missed"]["week_number"], by_role["missed"]["year"]) == (11, 2025)
+    assert (by_role["current"]["week_number"], by_role["current"]["year"]) == (12, 2025)
+    assert (by_role["next"]["week_number"], by_role["next"]["year"]) == (13, 2025)
+
+
+def test_get_selectable_weeks_late_and_unlock_flags():
+    instant = datetime(2025, 3, 17, 9, 1, 0, tzinfo=EASTERN)
+    with _freeze(instant):
+        by_role = {w["role"]: w for w in get_selectable_weeks()}
+
+    # Only the prior (missed) week is past its deadline.
+    assert by_role["missed"]["is_late"] is True
+    assert by_role["current"]["is_late"] is False
+    assert by_role["next"]["is_late"] is False
+    # The Toll only unlocks the current week's feed.
+    assert by_role["current"]["unlocks_feed"] is True
+    assert by_role["missed"]["unlocks_feed"] is False
+    assert by_role["next"]["unlocks_feed"] is False
+
+
+def test_get_selectable_weeks_year_boundary():
+    # Mon 2025-12-29 09:05 ET opens ISO week 1 of 2026; prior is week 52/2025.
+    instant = datetime(2025, 12, 29, 9, 5, 0, tzinfo=EASTERN)
+    with _freeze(instant):
+        by_role = {w["role"]: w for w in get_selectable_weeks()}
+
+    assert (by_role["missed"]["week_number"], by_role["missed"]["year"]) == (52, 2025)
+    assert (by_role["current"]["week_number"], by_role["current"]["year"]) == (1, 2026)
+    assert (by_role["next"]["week_number"], by_role["next"]["year"]) == (2, 2026)
 
 
 def test_year_boundary_week_53_handled():
