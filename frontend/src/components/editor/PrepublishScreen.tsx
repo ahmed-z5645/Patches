@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   DndContext,
@@ -48,13 +48,23 @@ function PreviewDraggableTile({
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id });
   const contentRef = useRef<HTMLDivElement>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const isResizingRef = useRef(false);
+  // Highest rowSpan auto-grow has already requested. Keeping this monotonic
+  // stops the ResizeObserver -> onResize -> re-render -> ResizeObserver loop
+  // that previously thrashed the grid and froze drag/resize.
+  const grownRowSpanRef = useRef(layout.rowSpan);
 
   useEffect(() => {
     if (!autoHeight) return;
     const el = contentRef.current;
     if (!el) return;
+    let raf: number | null = null;
 
     function measure() {
+      raf = null;
+      // Don't fight the user while they're hand-resizing this tile.
+      if (isResizingRef.current) return;
       const grid = el!.closest("[data-preview-grid]") as HTMLElement | null;
       if (!grid) return;
       const rowHeight = parseFloat(grid.style.gridAutoRows);
@@ -62,16 +72,32 @@ function PreviewDraggableTile({
       const gap = 12;
       const dragHandleHeight = 16;
       const scaledContentHeight = el!.scrollHeight * 0.7;
-      const needed = Math.ceil((scaledContentHeight + dragHandleHeight + gap) / (rowHeight + gap));
-      if (needed > layout.rowSpan) {
-        onResize(id, { rowSpan: needed });
+      const needed = Math.ceil(
+        (scaledContentHeight + dragHandleHeight + gap) / (rowHeight + gap)
+      );
+      // Honor a manual enlarge so we don't immediately fight it back down.
+      if (layout.rowSpan > grownRowSpanRef.current) {
+        grownRowSpanRef.current = layout.rowSpan;
+      }
+      const target = Math.max(needed, layout.rowSpan);
+      if (target > grownRowSpanRef.current) {
+        grownRowSpanRef.current = target;
+        onResize(id, { rowSpan: target });
       }
     }
 
-    measure();
-    const obs = new ResizeObserver(measure);
+    function schedule() {
+      if (raf != null) return;
+      raf = requestAnimationFrame(measure);
+    }
+
+    schedule();
+    const obs = new ResizeObserver(schedule);
     obs.observe(el);
-    return () => obs.disconnect();
+    return () => {
+      obs.disconnect();
+      if (raf != null) cancelAnimationFrame(raf);
+    };
   }, [autoHeight, id, layout.rowSpan, onResize]);
 
   const handleResizeCorner = useCallback(
@@ -80,6 +106,8 @@ function PreviewDraggableTile({
       e.stopPropagation();
       const target = e.currentTarget as HTMLElement;
       target.setPointerCapture(e.pointerId);
+      setIsResizing(true);
+      isResizingRef.current = true;
       const startX = e.clientX;
       const startY = e.clientY;
       const startColSpan = layout.colSpan;
@@ -105,6 +133,10 @@ function PreviewDraggableTile({
       function onUp() {
         target.removeEventListener("pointermove", onMove);
         target.removeEventListener("pointerup", onUp);
+        setIsResizing(false);
+        isResizingRef.current = false;
+        // Let auto-grow re-evaluate from the user's chosen size.
+        grownRowSpanRef.current = lastRowSpan;
       }
 
       target.addEventListener("pointermove", onMove);
@@ -116,12 +148,16 @@ function PreviewDraggableTile({
   const borderless = blockStyle?.borderless;
   const bgColor = blockStyle?.background_color;
   const dark = isDarkColor(bgColor);
+  const active = isDragging || isResizing;
   const style = {
     gridColumn: `${layout.colStart} / span ${layout.colSpan}`,
     gridRow: `${layout.rowStart} / span ${layout.rowSpan}`,
     x: transform?.x ?? 0,
     y: transform?.y ?? 0,
-    zIndex: isDragging ? 50 : undefined,
+    // Bring the tile being interacted with to the front so it (and its resize
+    // corner) is never trapped under an overlapping tile.
+    zIndex: active ? 50 : undefined,
+    touchAction: "none" as const,
     ...(bgColor ? { backgroundColor: bgColor } : {}),
     ...(dark ? { color: "#eff1f3" } : {}),
   };
@@ -132,17 +168,20 @@ function PreviewDraggableTile({
   return (
     <motion.div
       ref={setNodeRef}
-      layout={!isDragging}
+      // Disable the layout spring during direct manipulation so it can't
+      // fight the pointer or strand the tile mid-animation.
+      layout={!active}
       style={style}
+      // The whole tile is the drag handle — overlap no longer means the only
+      // grab target (a 16px strip) is buried under another tile.
+      {...listeners}
+      {...attributes}
       animate={{ opacity: isDragging ? 0.7 : 1, scale: isDragging ? 1.03 : 1 }}
       transition={{ duration: 0.15, x: { duration: 0 }, y: { duration: 0 }, scale: { type: "spring", stiffness: 300, damping: 15 }, layout: { type: "spring", stiffness: 200, damping: 18, mass: 1.2 } }}
-      className={`group/tile relative ${autoHeight ? "" : "overflow-hidden"} rounded-[8px] ${tileBorderClass} ${tileBgClass}`}
+      className={`group/tile relative cursor-grab active:cursor-grabbing ${autoHeight ? "" : "overflow-hidden"} rounded-[8px] ${tileBorderClass} ${tileBgClass}`}
     >
       <div
-        {...listeners}
-        {...attributes}
-        style={{ touchAction: "none" }}
-        className={`flex h-4 cursor-grab items-center justify-center active:cursor-grabbing ${handleBorderClass}`}
+        className={`flex h-4 items-center justify-center ${handleBorderClass}`}
       >
         <div className="flex gap-px">
           <span className="size-[3px] rounded-full bg-text/20" />
@@ -153,9 +192,9 @@ function PreviewDraggableTile({
       <div ref={contentRef} className={autoHeight ? "" : "h-[calc(100%-16px)] overflow-hidden"}>{children}</div>
       <div
         onPointerDown={handleResizeCorner}
-        className="absolute bottom-0.5 right-0.5 flex size-4 cursor-nwse-resize items-center justify-center"
+        className="absolute bottom-0 right-0 flex size-7 cursor-nwse-resize items-end justify-end p-1"
       >
-        <svg viewBox="0 0 10 10" className="size-2.5 text-text/30">
+        <svg viewBox="0 0 10 10" className="size-2.5 text-text/40">
           <path d="M9 1v8H1" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
       </div>
@@ -175,37 +214,6 @@ function MobilePhonePreview({
   const gridRef = useRef<HTMLDivElement>(null);
   const [gridMeta, setGridMeta] = useState({ colWidth: 0, rowHeight: 0 });
   const topLevel = blocks.filter((b) => !b.parent_block_id);
-
-  const reflowedLayouts = useMemo(() => {
-    const sorted = [...topLevel].sort((a, b) => {
-      if (a.grid_layout_mobile.rowStart !== b.grid_layout_mobile.rowStart)
-        return a.grid_layout_mobile.rowStart - b.grid_layout_mobile.rowStart;
-      return a.grid_layout_mobile.colStart - b.grid_layout_mobile.colStart;
-    });
-    const occupied = new Set<string>();
-    const result = new Map<string, MobileLayout>();
-    for (const block of sorted) {
-      const layout = block.grid_layout_mobile;
-      let rowStart = layout.rowStart;
-      while (true) {
-        let fits = true;
-        for (let r = rowStart; r < rowStart + layout.rowSpan && fits; r++) {
-          for (let c = layout.colStart; c < layout.colStart + layout.colSpan && fits; c++) {
-            if (occupied.has(`${r},${c}`)) fits = false;
-          }
-        }
-        if (fits) break;
-        rowStart++;
-      }
-      for (let r = rowStart; r < rowStart + layout.rowSpan; r++) {
-        for (let c = layout.colStart; c < layout.colStart + layout.colSpan; c++) {
-          occupied.add(`${r},${c}`);
-        }
-      }
-      result.set(block.id, { ...layout, rowStart });
-    }
-    return result;
-  }, [topLevel]);
 
   const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 5 } });
   const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
@@ -281,7 +289,7 @@ function MobilePhonePreview({
                 <PreviewDraggableTile
                   key={block.id}
                   id={block.id}
-                  layout={reflowedLayouts.get(block.id) || block.grid_layout_mobile}
+                  layout={block.grid_layout_mobile}
                   gridMeta={gridMeta}
                   onResize={onLayoutChange}
                   autoHeight={block.type === "markdown"}

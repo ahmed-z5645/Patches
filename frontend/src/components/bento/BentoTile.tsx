@@ -80,13 +80,46 @@ export function BentoTileMobile({
   className,
   withBorder,
   blockStyle,
+  autoHeight,
 }: {
   mobileLayout: MobileLayout;
   children: React.ReactNode;
   className?: string;
   withBorder?: boolean;
   blockStyle?: BlockStyle;
+  autoHeight?: boolean;
 }) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [effectiveRowSpan, setEffectiveRowSpan] = useState(mobileLayout.rowSpan);
+
+  useEffect(() => {
+    if (!autoHeight) {
+      setEffectiveRowSpan(mobileLayout.rowSpan);
+      return;
+    }
+
+    const el = contentRef.current;
+    if (!el) return;
+
+    function measure() {
+      const grid = el!.closest("[data-bento-grid]") as HTMLElement | null;
+      if (!grid) return;
+      const rowHeight = parseFloat(grid.style.gridAutoRows);
+      if (!rowHeight || isNaN(rowHeight)) return;
+      const gap = 12;
+      const contentHeight = el!.scrollHeight;
+      const needed = Math.ceil((contentHeight + gap) / (rowHeight + gap));
+      // Never shrink below what the author arranged; only grow to fit so
+      // markdown can't be clipped by overflow-hidden after publishing.
+      setEffectiveRowSpan(Math.max(needed, mobileLayout.rowSpan));
+    }
+
+    measure();
+    const obs = new ResizeObserver(measure);
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [autoHeight, mobileLayout.rowSpan]);
+
   const borderless = blockStyle?.borderless;
   const bgColor = blockStyle?.background_color;
   const borderClass = withBorder && !borderless ? "border border-primary" : "";
@@ -95,15 +128,15 @@ export function BentoTileMobile({
 
   return (
     <div
-      className={`overflow-hidden rounded-[15px] ${bgClass} ${borderClass} ${className ?? ""}`}
+      className={`rounded-[15px] ${bgClass} ${borderClass} ${autoHeight ? "" : "overflow-hidden"} ${className ?? ""}`}
       style={{
         gridColumn: `${mobileLayout.colStart} / span ${mobileLayout.colSpan}`,
-        gridRow: `${mobileLayout.rowStart} / span ${mobileLayout.rowSpan}`,
+        gridRow: `${mobileLayout.rowStart} / span ${effectiveRowSpan}`,
         ...(bgColor ? { backgroundColor: bgColor } : {}),
         ...(dark ? { color: "#eff1f3" } : {}),
       }}
     >
-      {children}
+      <div ref={contentRef} className={autoHeight ? "" : "h-full"}>{children}</div>
     </div>
   );
 }
