@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Edition is a personal documentation platform with "Bento" grid aesthetics. Users publish weekly posts containing rich artifact tiles. The core mechanic: you must publish a valid post (title + 100 words minimum) each week to unlock your followers' posts for that week. Posts are revealed every Sunday at midnight.
+Edition is a personal documentation platform with "Bento" grid aesthetics. Users publish weekly posts containing rich artifact tiles. The core mechanic: you must publish a valid post (title + 100 words minimum) each week to unlock your followers' posts for that week. Posts are revealed every Monday at 9:00 AM Eastern.
 
 ## Stack
 
@@ -38,7 +38,7 @@ The frontend uses Supabase Auth for authentication (session cookies managed via 
 
 - `(auth)/` route group — login, signup, callback (public, redirects to /feed if authed)
 - `(app)/` route group — feed, editor, archive, settings (protected, redirects to /login if not authed)
-- `[username]/` — Public legacy page (always reachable, bypasses the Toll; Sunday reveal still applies to non-owners)
+- `[username]/` — Public legacy page (always reachable, bypasses the Toll; Monday 9 AM ET reveal still applies to non-owners)
 - Layout: vertical Sidebar on desktop (80px left rail), BottomTabBar on mobile
 
 ### FastAPI Backend
@@ -66,8 +66,8 @@ The editor and viewer are the same interface — zero abstraction between drafti
 ### Social Mechanics
 
 - **The Toll:** Publishing a valid post (title + ≥100 words) unlocks the current week's follower feed.
-- **Sunday Reveal:** Each Sunday at midnight, the week's posts become visible to unlocked users. Computed at query time, no cron job.
-- **Late Flag:** Posts after Sunday midnight get a permanent "Late" flag but still unlock the feed.
+- **Monday Reveal:** Each Monday at 9:00 AM Eastern (America/New_York), the week's posts become visible to unlocked users. The edition-week boundary is Mon 9 AM ET, so Mon 00:00–08:59 ET still counts as the prior week. Computed at query time, no cron job.
+- **Late Flag:** Posts published after the Monday 9:00 AM ET deadline get a permanent "Late" flag but still unlock the feed. Late posts stay accepted until the week fully closes (~one extra edition week of grace; see `is_week_closed`).
 - **Archive:** Past-week posts are visible to followers without needing a current-week post.
 
 ### Database Schema (Supabase/PostgreSQL)
@@ -86,4 +86,4 @@ Key tables: `profiles`, `follows`, `posts`, `blocks`. Posts are keyed by `unique
 - Post validation: title required, word_count ≥ 100 across all markdown blocks
 - Grid row spans map to fractional heights: stored rowSpan / 2 = visual tile height
 - Mobile layout is user-defined, not auto-derived from desktop layout
-- Public profile pages (`/[username]`) bypass the Toll (no publish-to-unlock required to view them), but the Sunday reveal embargo still applies to non-owners — anonymous and logged-in non-owner visitors only see weeks that have already revealed; the owner sees their own current-week post early
+- Public profile pages (`/[username]`) bypass the Toll (no publish-to-unlock required to view them), but the Monday 9 AM ET reveal embargo still applies to non-owners — anonymous and logged-in non-owner visitors only see weeks that have already revealed; the owner sees their own current-week post early
