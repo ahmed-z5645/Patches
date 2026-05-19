@@ -51,7 +51,7 @@ export function WeekPicker({ options }: { options: WeekOption[] }) {
   return (
     <div className="mx-auto max-w-5xl space-y-8">
       <div className="space-y-2">
-        <h1 className="font-[family-name:var(--font-cabinet)] text-[64px] font-bold leading-tight">
+        <h1 className="font-[family-name:var(--font-cabinet)] text-[48px] font-bold leading-tight md:text-[64px]">
           Choose a week
         </h1>
         <p className="text-sm text-text/60">
