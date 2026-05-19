@@ -23,8 +23,8 @@ export default async function LandingPage() {
             <span className="word">Patches</span>
           </Link>
           <div className="nav-links">
-            <a href="#toll" className="anchor">how it works</a>
-            <a href="#use-cases" className="anchor">for who</a>
+            <a href="#toll" className="anchor">how?</a>
+            <a href="#use-cases" className="anchor">who?</a>
             <Link href="/login" className="signin">Sign in</Link>
             <Link href="/signup" className="btn btn-primary">Get started</Link>
           </div>

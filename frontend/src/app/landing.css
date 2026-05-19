@@ -81,6 +81,8 @@
 .landing-page .nav-links a { font-size: 14px; color: var(--fg-2); }
 .landing-page .nav-links a:hover { color: var(--text); }
 .landing-page .nav-links .signin { color: var(--text); font-weight: 500; }
+.landing-page .nav-links a.btn-primary,
+.landing-page .nav-links a.btn-primary:hover { color: #fff; }
 @media (max-width: 640px) {
   .landing-page .nav-links a.anchor { display: none; }
   .landing-page .nav-links { gap: 16px; }

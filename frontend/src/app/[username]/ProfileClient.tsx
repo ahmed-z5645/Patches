@@ -144,17 +144,31 @@ export function ProfileClient({ profile }: { profile: Profile }) {
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
-        <div className="flex items-center gap-5">
-          <div className="size-20 shrink-0 rounded-full" style={{ backgroundColor: profile.avatar_color || "#223843" }} />
-          <div>
-            <h1 className="font-[family-name:var(--font-cabinet)] text-3xl font-bold">
-              {profile.display_name || profile.username}
-            </h1>
-            <p className="text-sm text-text/40">@{profile.username}</p>
-            {profile.bio && (
-              <p className="mt-2 max-w-md text-sm text-text/60">{profile.bio}</p>
-            )}
+        <div className="flex w-full items-start justify-between md:w-auto md:justify-start">
+          <div className="flex items-center gap-5">
+            <div className="size-20 shrink-0 rounded-full" style={{ backgroundColor: profile.avatar_color || "#223843" }} />
+            <div>
+              <h1 className="font-[family-name:var(--font-cabinet)] text-3xl font-bold">
+                {profile.display_name || profile.username}
+              </h1>
+              <p className="text-sm text-text/40">@{profile.username}</p>
+              {profile.bio && (
+                <p className="mt-2 max-w-md text-sm text-text/60">{profile.bio}</p>
+              )}
+            </div>
           </div>
+          {isOwnProfile && (
+            <Link
+              href="/settings"
+              aria-label="Settings"
+              className="shrink-0 text-text/40 transition-colors hover:text-accent md:hidden"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </Link>
+          )}
         </div>
 
         <div className="flex items-center gap-6">

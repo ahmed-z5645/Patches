@@ -2,10 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 from app.deps import get_db, get_authenticated_user
 from app.auth import get_optional_user
-from app.models.posts import PostResponse, PostCreate, PostUpdate
+from app.models.posts import PostResponse, PostCreate, PostUpdate, WeekOption
 from app.services.posts import calculate_word_count
 from app.services.feed import is_week_unlocked
-from app.services.weeks import get_edition_week, is_late_for_week, can_target_week, is_revealed
+from app.services.weeks import (
+    get_edition_week,
+    is_late_for_week,
+    can_target_week,
+    is_revealed,
+    get_selectable_weeks,
+)
 from datetime import datetime, timedelta, timezone
 
 router = APIRouter(prefix="/api/posts", tags=["posts"])
@@ -129,6 +135,45 @@ async def get_editor_post(
         return _get_or_create(db, user_id, next_week, next_year)
 
     return _get_or_create(db, user_id, week, year)
+
+
+@router.get("/me/week-options", response_model=list[WeekOption])
+async def get_week_options(
+    user_id: str = Depends(get_authenticated_user),
+    db: Client = Depends(get_db),
+):
+    """Weeks the user may post for now (missed / current / next), each with the
+    user's existing post status so the editor can show a picker."""
+    options: list[WeekOption] = []
+    for wk in get_selectable_weeks():
+        existing = (
+            db.table("posts")
+            .select("id, is_published")
+            .eq("user_id", user_id)
+            .eq("week_number", wk["week_number"])
+            .eq("year", wk["year"])
+            .execute()
+        )
+        post = existing.data[0] if existing.data else None
+        is_published = bool(post and post["is_published"])
+
+        # A caught-up prior week is no longer "missed" — drop it.
+        if wk["role"] == "missed" and is_published:
+            continue
+
+        options.append(
+            WeekOption(
+                role=wk["role"],
+                week_number=wk["week_number"],
+                year=wk["year"],
+                is_late=wk["is_late"],
+                unlocks_feed=wk["unlocks_feed"],
+                has_post=post is not None,
+                is_published=is_published,
+                post_id=post["id"] if post else None,
+            )
+        )
+    return options
 
 
 @router.get("/{post_id}")

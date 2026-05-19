@@ -7,11 +7,12 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { keys } from "@/lib/query-keys";
 import type { Block, Post } from "@/lib/types/blocks";
-import { BentoGrid } from "@/components/bento/BentoGrid";
-import { BentoTile } from "@/components/bento/BentoTile";
+import { BentoGrid, BentoGridMobile } from "@/components/bento/BentoGrid";
+import { BentoTile, BentoTileMobile } from "@/components/bento/BentoTile";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { LateBadge } from "@/components/feed/LateBadge";
 import { EditorSplashScreen } from "@/components/editor/EditorSplashScreen";
+import { useIsMobile } from "@/lib/hooks/useMediaQuery";
 
 interface FullPost extends Post {
   blocks: Block[];
@@ -24,6 +25,7 @@ interface FullPost extends Post {
 
 export default function PostPage() {
   const { postId } = useParams<{ postId: string }>();
+  const isMobile = useIsMobile();
 
   const { data: post, isLoading, error } = useQuery({
     queryKey: keys.post(postId),
@@ -92,23 +94,41 @@ export default function PostPage() {
         </span>
       </div>
 
-      <BentoGrid>
-        {topLevelBlocks.map((block) => (
-          <BentoTile
-            key={block.id}
-            desktopLayout={block.grid_layout_desktop}
-            mobileLayout={block.grid_layout_mobile}
-            withBorder
-            blockStyle={block.style}
-            autoHeight={block.type === "markdown"}
-          >
-            <BlockRenderer
-              block={block}
-              childBlocks={childBlocksMap[block.id]}
-            />
-          </BentoTile>
-        ))}
-      </BentoGrid>
+      {isMobile ? (
+        <BentoGridMobile blocks={topLevelBlocks}>
+          {topLevelBlocks.map((block) => (
+            <BentoTileMobile
+              key={block.id}
+              mobileLayout={block.grid_layout_mobile}
+              withBorder
+              blockStyle={block.style}
+            >
+              <BlockRenderer
+                block={block}
+                childBlocks={childBlocksMap[block.id]}
+              />
+            </BentoTileMobile>
+          ))}
+        </BentoGridMobile>
+      ) : (
+        <BentoGrid blocks={topLevelBlocks}>
+          {topLevelBlocks.map((block) => (
+            <BentoTile
+              key={block.id}
+              desktopLayout={block.grid_layout_desktop}
+              mobileLayout={block.grid_layout_mobile}
+              withBorder
+              blockStyle={block.style}
+              autoHeight={block.type === "markdown"}
+            >
+              <BlockRenderer
+                block={block}
+                childBlocks={childBlocksMap[block.id]}
+              />
+            </BentoTile>
+          ))}
+        </BentoGrid>
+      )}
     </div>
   );
 }

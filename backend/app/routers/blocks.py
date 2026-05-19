@@ -43,6 +43,7 @@ async def create_block(
                 "grid_layout_mobile": body.grid_layout_mobile,
                 "parent_block_id": body.parent_block_id,
                 "float_position": body.float_position,
+                "style": body.style if body.style is not None else {},
             }
         )
         .execute()
