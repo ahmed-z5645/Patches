@@ -19,6 +19,7 @@ import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { PostCard } from "@/components/feed/PostCard";
 import { COVER_COLORS } from "@/lib/constants/colors";
 import { DEFAULT_MOBILE_LAYOUTS } from "./EditorCanvas";
+import { countWords } from "@/lib/utils/wordcount";
 
 interface PrepublishScreenProps {
   post: Post;
@@ -266,6 +267,10 @@ function PaletteItem({ block }: { block: Block }) {
 
 function PhonePreview({
   title,
+  username,
+  weekNumber,
+  year,
+  readingMinutes,
   placed,
   gridRef,
   gridMeta,
@@ -273,6 +278,10 @@ function PhonePreview({
   onRemove,
 }: {
   title: string;
+  username: string;
+  weekNumber: number;
+  year: number;
+  readingMinutes: number;
   placed: Block[];
   gridRef: React.RefObject<HTMLDivElement | null>;
   gridMeta: { colWidth: number; rowHeight: number };
@@ -280,6 +289,9 @@ function PhonePreview({
   onRemove: (id: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "phone" });
+  const handle = username ? `@${username}` : "you";
+  const pageName = username ? `edition.app/${username}` : "edition.app";
+  const metaBits = [handle, `Week ${weekNumber}, ${year}`, `${readingMinutes} min read`];
 
   return (
     <div
@@ -293,7 +305,7 @@ function PhonePreview({
           <svg width="12" height="12" viewBox="0 0 12 12" className="text-text/60">
             <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
           </svg>
-          <span className="text-[10px] text-text/60">page name hereee</span>
+          <span className="truncate text-[10px] text-text/60">{pageName}</span>
         </div>
 
         <div ref={setNodeRef} className={`flex-1 overflow-y-auto rounded-[12px] px-1 transition-colors ${isOver ? "bg-accent/10" : ""}`}>
@@ -301,7 +313,7 @@ function PhonePreview({
             {title || "Untitled"}
           </h2>
           <p className="mb-3 text-[8px] text-text/40">
-            META DATA LIKE AUTHOR AND PUBLISH DATE AND EST READING TIME AND SUCH
+            {metaBits.join(" · ")}
           </p>
 
           <div
@@ -415,6 +427,15 @@ export function PrepublishScreen({
   }, [visible]);
 
   const topLevel = useMemo(() => blocks.filter((b) => !b.parent_block_id), [blocks]);
+  const readingMinutes = useMemo(() => {
+    const words = blocks
+      .filter((b) => b.type === "markdown" && !b.parent_block_id)
+      .reduce(
+        (sum, b) => sum + countWords((b.content as { markdown?: string }).markdown || ""),
+        0
+      );
+    return Math.max(1, Math.round(words / 200));
+  }, [blocks]);
   const palette = useMemo(
     () => topLevel.filter((b) => isMobileHidden(b.grid_layout_mobile)),
     [topLevel]
@@ -594,6 +615,10 @@ export function PrepublishScreen({
                     <div className="w-[280px] shrink-0">
                       <PhonePreview
                         title={post.title || ""}
+                        username={username}
+                        weekNumber={post.week_number}
+                        year={post.year}
+                        readingMinutes={readingMinutes}
                         placed={placed}
                         gridRef={gridRef}
                         gridMeta={gridMeta}
