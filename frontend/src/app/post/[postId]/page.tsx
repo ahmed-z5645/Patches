@@ -102,6 +102,7 @@ export default function PostPage() {
               mobileLayout={block.grid_layout_mobile}
               withBorder
               blockStyle={block.style}
+              autoHeight={block.type === "markdown"}
             >
               <BlockRenderer
                 block={block}
