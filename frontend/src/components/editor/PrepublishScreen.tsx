@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   DndContext,
@@ -9,14 +9,16 @@ import {
   useSensor,
   useSensors,
   useDraggable,
+  useDroppable,
   type DragEndEvent,
 } from "@dnd-kit/core";
 import type { Block, BlockStyle, Post } from "@/lib/types/blocks";
 import { isDarkColor } from "@/lib/constants/colors";
-import type { MobileLayout } from "@/lib/types/grid";
+import { MOBILE_HIDDEN_LAYOUT, isMobileHidden, type MobileLayout } from "@/lib/types/grid";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { PostCard } from "@/components/feed/PostCard";
 import { COVER_COLORS } from "@/lib/constants/colors";
+import { DEFAULT_MOBILE_LAYOUTS } from "./EditorCanvas";
 
 interface PrepublishScreenProps {
   post: Post;
@@ -33,6 +35,7 @@ function PreviewDraggableTile({
   layout,
   gridMeta,
   onResize,
+  onRemove,
   children,
   autoHeight,
   blockStyle,
@@ -41,18 +44,16 @@ function PreviewDraggableTile({
   layout: MobileLayout;
   gridMeta: { colWidth: number; rowHeight: number };
   onResize: (id: string, changes: Partial<MobileLayout>) => void;
+  onRemove: (id: string) => void;
   children: React.ReactNode;
   autoHeight?: boolean;
   blockStyle?: BlockStyle;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id });
+    useDraggable({ id, data: { from: "phone" } });
   const contentRef = useRef<HTMLDivElement>(null);
   const [isResizing, setIsResizing] = useState(false);
   const isResizingRef = useRef(false);
-  // Highest rowSpan auto-grow has already requested. Keeping this monotonic
-  // stops the ResizeObserver -> onResize -> re-render -> ResizeObserver loop
-  // that previously thrashed the grid and froze drag/resize.
   const grownRowSpanRef = useRef(layout.rowSpan);
 
   useEffect(() => {
@@ -63,7 +64,6 @@ function PreviewDraggableTile({
 
     function measure() {
       raf = null;
-      // Don't fight the user while they're hand-resizing this tile.
       if (isResizingRef.current) return;
       const grid = el!.closest("[data-preview-grid]") as HTMLElement | null;
       if (!grid) return;
@@ -75,7 +75,6 @@ function PreviewDraggableTile({
       const needed = Math.ceil(
         (scaledContentHeight + dragHandleHeight + gap) / (rowHeight + gap)
       );
-      // Honor a manual enlarge so we don't immediately fight it back down.
       if (layout.rowSpan > grownRowSpanRef.current) {
         grownRowSpanRef.current = layout.rowSpan;
       }
@@ -116,13 +115,27 @@ function PreviewDraggableTile({
       let lastRowSpan = startRowSpan;
       const gap = 12;
 
+      // Minimum rows needed to show the block's content without clipping.
+      // Content is rendered at scale(0.7) inside the tile, plus a 16px drag handle.
+      const dragHandleHeight = 16;
+      const contentEl = contentRef.current;
+      const minRowSpan = contentEl && gridMeta.rowHeight
+        ? Math.max(
+            1,
+            Math.ceil(
+              (contentEl.scrollHeight * 0.7 + dragHandleHeight + gap) /
+                (gridMeta.rowHeight + gap)
+            )
+          )
+        : 1;
+
       function onMove(ev: PointerEvent) {
         const dx = ev.clientX - startX;
         const dy = ev.clientY - startY;
         const colDelta = Math.round(dx / (gridMeta.colWidth + gap));
         const rowDelta = Math.round(dy / (gridMeta.rowHeight + gap));
         const newColSpan = Math.max(1, Math.min(3 - layout.colStart, startColSpan + colDelta));
-        const newRowSpan = Math.max(1, startRowSpan + rowDelta);
+        const newRowSpan = Math.max(minRowSpan, startRowSpan + rowDelta);
         if (newColSpan !== lastColSpan || newRowSpan !== lastRowSpan) {
           lastColSpan = newColSpan;
           lastRowSpan = newRowSpan;
@@ -135,7 +148,6 @@ function PreviewDraggableTile({
         target.removeEventListener("pointerup", onUp);
         setIsResizing(false);
         isResizingRef.current = false;
-        // Let auto-grow re-evaluate from the user's chosen size.
         grownRowSpanRef.current = lastRowSpan;
       }
 
@@ -143,6 +155,19 @@ function PreviewDraggableTile({
       target.addEventListener("pointerup", onUp);
     },
     [id, layout, gridMeta, onResize]
+  );
+
+  const handleRemovePointerDown = useCallback((e: React.PointerEvent) => {
+    // Whole tile is a drag handle — stop the gesture so dnd-kit doesn't claim it.
+    e.stopPropagation();
+  }, []);
+
+  const handleRemoveClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onRemove(id);
+    },
+    [id, onRemove]
   );
 
   const borderless = blockStyle?.borderless;
@@ -154,8 +179,6 @@ function PreviewDraggableTile({
     gridRow: `${layout.rowStart} / span ${layout.rowSpan}`,
     x: transform?.x ?? 0,
     y: transform?.y ?? 0,
-    // Bring the tile being interacted with to the front so it (and its resize
-    // corner) is never trapped under an overlapping tile.
     zIndex: active ? 50 : undefined,
     touchAction: "none" as const,
     ...(bgColor ? { backgroundColor: bgColor } : {}),
@@ -168,12 +191,8 @@ function PreviewDraggableTile({
   return (
     <motion.div
       ref={setNodeRef}
-      // Disable the layout spring during direct manipulation so it can't
-      // fight the pointer or strand the tile mid-animation.
       layout={!active}
       style={style}
-      // The whole tile is the drag handle — overlap no longer means the only
-      // grab target (a 16px strip) is buried under another tile.
       {...listeners}
       {...attributes}
       animate={{ opacity: isDragging ? 0.7 : 1, scale: isDragging ? 1.03 : 1 }}
@@ -190,6 +209,17 @@ function PreviewDraggableTile({
         </div>
       </div>
       <div ref={contentRef} className={autoHeight ? "" : "h-[calc(100%-16px)] overflow-hidden"}>{children}</div>
+      <button
+        type="button"
+        onPointerDown={handleRemovePointerDown}
+        onClick={handleRemoveClick}
+        aria-label="Remove from mobile layout"
+        className="absolute right-1 top-1 z-10 flex size-4 items-center justify-center rounded-full bg-text/70 text-bg opacity-0 transition-opacity group-hover/tile:opacity-100"
+      >
+        <svg viewBox="0 0 10 10" className="size-2">
+          <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </button>
       <div
         onPointerDown={handleResizeCorner}
         className="absolute bottom-0 right-0 flex size-7 cursor-nwse-resize items-end justify-end p-1"
@@ -202,54 +232,54 @@ function PreviewDraggableTile({
   );
 }
 
-function MobilePhonePreview({
+function PaletteItem({ block }: { block: Block }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({ id: block.id, data: { from: "palette", type: block.type } });
+  const style = {
+    x: transform?.x ?? 0,
+    y: transform?.y ?? 0,
+    zIndex: isDragging ? 50 : undefined,
+    touchAction: "none" as const,
+  };
+  return (
+    <motion.div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      animate={{ opacity: isDragging ? 0.7 : 1, scale: isDragging ? 1.03 : 1 }}
+      transition={{ duration: 0.15, x: { duration: 0 }, y: { duration: 0 } }}
+      className="group/palette cursor-grab overflow-hidden rounded-[10px] border border-primary/50 bg-bg active:cursor-grabbing"
+    >
+      <div className="flex items-center justify-between border-b border-primary/20 px-2 py-1">
+        <span className="text-[10px] uppercase tracking-wide text-text/60">{block.type}</span>
+        <span className="text-[10px] text-text/30">drag</span>
+      </div>
+      <div className="pointer-events-none h-[90px] overflow-hidden">
+        <div style={{ width: "200%", height: "200%", transform: "scale(0.5)", transformOrigin: "top left" }}>
+          <BlockRenderer block={block} />
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function PhonePreview({
   title,
-  blocks,
+  placed,
+  gridRef,
+  gridMeta,
   onLayoutChange,
+  onRemove,
 }: {
   title: string;
-  blocks: Block[];
+  placed: Block[];
+  gridRef: React.RefObject<HTMLDivElement | null>;
+  gridMeta: { colWidth: number; rowHeight: number };
   onLayoutChange: (id: string, changes: Partial<MobileLayout>) => void;
+  onRemove: (id: string) => void;
 }) {
-  const gridRef = useRef<HTMLDivElement>(null);
-  const [gridMeta, setGridMeta] = useState({ colWidth: 0, rowHeight: 0 });
-  const topLevel = blocks.filter((b) => !b.parent_block_id);
-
-  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 5 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
-  const sensors = useSensors(touchSensor, pointerSensor);
-
-  useEffect(() => {
-    function update() {
-      if (!gridRef.current) return;
-      const w = gridRef.current.clientWidth;
-      const gap = 12;
-      const colWidth = (w - gap) / 2;
-      setGridMeta({ colWidth, rowHeight: colWidth / 2 });
-    }
-    update();
-    const obs = new ResizeObserver(update);
-    if (gridRef.current) obs.observe(gridRef.current);
-    return () => obs.disconnect();
-  }, []);
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, delta } = event;
-    if (!gridMeta.colWidth || !gridMeta.rowHeight) return;
-    const blockId = active.id as string;
-    const block = topLevel.find((b) => b.id === blockId);
-    if (!block) return;
-    const layout = block.grid_layout_mobile;
-
-    const gap = 12;
-    const colDelta = Math.round(delta.x / (gridMeta.colWidth + gap));
-    const rowDelta = Math.round(delta.y / (gridMeta.rowHeight + gap));
-    if (colDelta === 0 && rowDelta === 0) return;
-
-    const newColStart = Math.max(1, Math.min(3 - layout.colSpan, layout.colStart + colDelta));
-    const newRowStart = Math.max(1, layout.rowStart + rowDelta);
-    onLayoutChange(blockId, { colStart: newColStart, rowStart: newRowStart });
-  }
+  const { setNodeRef, isOver } = useDroppable({ id: "phone" });
 
   return (
     <div
@@ -266,7 +296,7 @@ function MobilePhonePreview({
           <span className="text-[10px] text-text/60">page name hereee</span>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-1">
+        <div ref={setNodeRef} className={`flex-1 overflow-y-auto rounded-[12px] px-1 transition-colors ${isOver ? "bg-accent/10" : ""}`}>
           <h2 className="mb-1 font-[family-name:var(--font-cabinet)] text-base font-bold leading-tight">
             {title || "Untitled"}
           </h2>
@@ -274,36 +304,43 @@ function MobilePhonePreview({
             META DATA LIKE AUTHOR AND PUBLISH DATE AND EST READING TIME AND SUCH
           </p>
 
-          <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-            <div
-              ref={gridRef}
-              data-preview-grid
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                gridAutoRows: gridMeta.rowHeight || "auto",
-                gap: 12,
-              }}
-            >
-              {topLevel.map((block) => (
-                <PreviewDraggableTile
-                  key={block.id}
-                  id={block.id}
-                  layout={block.grid_layout_mobile}
-                  gridMeta={gridMeta}
-                  onResize={onLayoutChange}
-                  autoHeight={block.type === "markdown"}
-                  blockStyle={block.style}
-                >
-                  <div className="pointer-events-none h-full overflow-hidden">
-                    <div style={{ width: "142.86%", height: "142.86%", transform: "scale(0.7)", transformOrigin: "top left" }}>
-                      <BlockRenderer block={block} />
-                    </div>
+          <div
+            ref={gridRef}
+            data-preview-grid
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gridAutoRows: gridMeta.rowHeight || 60,
+              gap: 12,
+              minHeight: placed.length === 0 ? 200 : undefined,
+            }}
+          >
+            {placed.length === 0 && (
+              <div className="col-span-2 flex h-[200px] items-center justify-center rounded-[12px] border border-dashed border-text/20">
+                <p className="text-center text-[10px] text-text/40">
+                  drag blocks here<br />to place them on mobile
+                </p>
+              </div>
+            )}
+            {placed.map((block) => (
+              <PreviewDraggableTile
+                key={block.id}
+                id={block.id}
+                layout={block.grid_layout_mobile}
+                gridMeta={gridMeta}
+                onResize={onLayoutChange}
+                onRemove={onRemove}
+                autoHeight={block.type === "markdown"}
+                blockStyle={block.style}
+              >
+                <div className="pointer-events-none h-full overflow-hidden">
+                  <div style={{ width: "142.86%", height: "142.86%", transform: "scale(0.7)", transformOrigin: "top left" }}>
+                    <BlockRenderer block={block} />
                   </div>
-                </PreviewDraggableTile>
-              ))}
-            </div>
-          </DndContext>
+                </div>
+              </PreviewDraggableTile>
+            ))}
+          </div>
         </div>
 
         <div className="mt-2 flex items-center justify-around border-t border-primary/30 pt-2">
@@ -338,10 +375,142 @@ export function PrepublishScreen({
   const [coverColor, setCoverColor] = useState(post.cover_color || COVER_COLORS[0]);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [gridMeta, setGridMeta] = useState({ colWidth: 0, rowHeight: 0 });
+  const didResetRef = useRef(false);
+
+  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 5 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
+  const sensors = useSensors(touchSensor, pointerSensor);
 
   useEffect(() => {
     setVisible(true);
   }, []);
+
+  // Reset every top-level block to "unplaced" exactly once on mount so the
+  // phone starts empty and the palette shows every block.
+  useEffect(() => {
+    if (didResetRef.current) return;
+    didResetRef.current = true;
+    for (const b of blocks) {
+      if (b.parent_block_id) continue;
+      if (!isMobileHidden(b.grid_layout_mobile)) {
+        onMobileLayoutChange(b.id, MOBILE_HIDDEN_LAYOUT);
+      }
+    }
+  }, [blocks, onMobileLayoutChange]);
+
+  useEffect(() => {
+    function update() {
+      if (!gridRef.current) return;
+      const w = gridRef.current.clientWidth;
+      const gap = 12;
+      const colWidth = (w - gap) / 2;
+      setGridMeta({ colWidth, rowHeight: colWidth / 2 });
+    }
+    update();
+    const obs = new ResizeObserver(update);
+    if (gridRef.current) obs.observe(gridRef.current);
+    return () => obs.disconnect();
+  }, [visible]);
+
+  const topLevel = useMemo(() => blocks.filter((b) => !b.parent_block_id), [blocks]);
+  const palette = useMemo(
+    () => topLevel.filter((b) => isMobileHidden(b.grid_layout_mobile)),
+    [topLevel]
+  );
+  const placed = useMemo(
+    () => topLevel.filter((b) => !isMobileHidden(b.grid_layout_mobile)),
+    [topLevel]
+  );
+
+  function findEmptyCell(): { colStart: number; rowStart: number } {
+    // First-fit scan, columns left-to-right within each row.
+    for (let r = 1; r <= 100; r++) {
+      for (let c = 1; c <= 2; c++) {
+        const occupied = placed.some((b) => {
+          const l = b.grid_layout_mobile;
+          return (
+            c >= l.colStart &&
+            c < l.colStart + l.colSpan &&
+            r >= l.rowStart &&
+            r < l.rowStart + l.rowSpan
+          );
+        });
+        if (!occupied) return { colStart: c, rowStart: r };
+      }
+    }
+    return { colStart: 1, rowStart: 1 };
+  }
+
+  function snapToCell(clientX: number, clientY: number): { colStart: number; rowStart: number } | null {
+    if (!gridRef.current || !gridMeta.colWidth || !gridMeta.rowHeight) return null;
+    const rect = gridRef.current.getBoundingClientRect();
+    const gap = 12;
+    const relX = clientX - rect.left;
+    const relY = clientY - rect.top;
+    const colStart = Math.max(1, Math.min(2, Math.floor(relX / (gridMeta.colWidth + gap)) + 1));
+    const rowStart = Math.max(1, Math.floor(relY / (gridMeta.rowHeight + gap)) + 1);
+    return { colStart, rowStart };
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over, delta, activatorEvent } = event;
+    const blockId = active.id as string;
+    const from = (active.data.current as { from?: string } | undefined)?.from;
+
+    if (from === "palette") {
+      if (over?.id !== "phone") return;
+      const block = blocks.find((b) => b.id === blockId);
+      if (!block) return;
+      const defaults =
+        DEFAULT_MOBILE_LAYOUTS[block.type] || { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 };
+
+      // Snap to the cell under the pointer when we can read it; otherwise
+      // fall back to the next empty cell.
+      let placement: { colStart: number; rowStart: number } | null = null;
+      const e = activatorEvent as PointerEvent | TouchEvent | MouseEvent;
+      let startX: number | null = null;
+      let startY: number | null = null;
+      if (e && "clientX" in e && typeof e.clientX === "number") {
+        startX = e.clientX;
+        startY = (e as PointerEvent).clientY;
+      } else if (e && "touches" in e && e.touches?.[0]) {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+      }
+      if (startX != null && startY != null) {
+        placement = snapToCell(startX + delta.x, startY + delta.y);
+      }
+      if (!placement) placement = findEmptyCell();
+
+      const colSpan = Math.min(defaults.colSpan, 3 - placement.colStart);
+      onMobileLayoutChange(blockId, {
+        colStart: placement.colStart,
+        rowStart: placement.rowStart,
+        colSpan: Math.max(1, colSpan),
+        rowSpan: defaults.rowSpan,
+      });
+      return;
+    }
+
+    // from === "phone" — move within the phone grid (existing snap logic).
+    if (!gridMeta.colWidth || !gridMeta.rowHeight) return;
+    const block = topLevel.find((b) => b.id === blockId);
+    if (!block) return;
+    const layout = block.grid_layout_mobile;
+    const gap = 12;
+    const colDelta = Math.round(delta.x / (gridMeta.colWidth + gap));
+    const rowDelta = Math.round(delta.y / (gridMeta.rowHeight + gap));
+    if (colDelta === 0 && rowDelta === 0) return;
+    const newColStart = Math.max(1, Math.min(3 - layout.colSpan, layout.colStart + colDelta));
+    const newRowStart = Math.max(1, layout.rowStart + rowDelta);
+    onMobileLayoutChange(blockId, { colStart: newColStart, rowStart: newRowStart });
+  }
+
+  function handleRemove(id: string) {
+    onMobileLayoutChange(id, MOBILE_HIDDEN_LAYOUT);
+  }
 
   function handleCancel() {
     setVisible(false);
@@ -384,9 +553,9 @@ export function PrepublishScreen({
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            className="fixed inset-0 z-50 flex flex-col bg-bg"
+            className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-bg"
           >
-            <div className="flex flex-1 items-center justify-center px-10">
+            <div className="flex flex-1 items-start justify-center px-10 py-10">
               <div className="flex flex-col">
                 <button
                   onClick={handleCancel}
@@ -398,114 +567,126 @@ export function PrepublishScreen({
                   back to editor
                 </button>
 
-                <div className="flex items-start gap-16">
-                  <div className="flex w-[380px] flex-col">
-                    <h1 className="mb-3 font-[family-name:var(--font-cabinet)] text-3xl font-bold">
-                      Ready to publish?
-                    </h1>
+                <h1 className="mb-2 font-[family-name:var(--font-cabinet)] text-3xl font-bold">
+                  Ready to publish?
+                </h1>
+                <p className="mb-8 max-w-2xl text-sm text-text/70">
+                  Drag blocks from the palette on the left into the phone to arrange your mobile layout. Anything left in the palette will be hidden on mobile (still visible on desktop). Then pick your tags and cover.
+                </p>
 
-                    <ul className="mb-8 space-y-1 text-sm text-text/70">
-                      <li className="flex items-start gap-2">
-                        <span className="mt-1.5 size-1 shrink-0 rounded-full bg-text/40" />
-                        Scroll through how this might look on your phone
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-1.5 size-1 shrink-0 rounded-full bg-text/40" />
-                        Components can be resized, replaced, or deleted for mobile view!
-                      </li>
-                    </ul>
-
-                    <h2 className="mb-3 font-[family-name:var(--font-cabinet)] text-xl font-bold">
-                      Add tags:
-                    </h2>
-                    <div className="mb-8 flex flex-wrap content-start items-start gap-2 rounded-[15px] border border-primary/40 p-5" style={{ height: 80 }}>
-                      {tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="flex items-center gap-1 rounded-full bg-text/10 px-3 py-1.5 text-sm"
-                        >
-                          #{tag}
-                          <button
-                            onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
-                            className="ml-0.5 text-text/40 hover:text-text"
-                          >
-                            &times;
-                          </button>
-                        </span>
-                      ))}
-                      {tags.length < 3 && (
-                        <input
-                          value={tagInput}
-                          onChange={(e) => setTagInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              handleAddTag();
-                            }
-                          }}
-                          placeholder={tags.length === 0 ? "e.g. travel, cooking..." : "add another..."}
-                          className="flex-1 bg-transparent text-sm outline-none placeholder:text-text/30"
-                        />
-                      )}
+                <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+                  <div className="flex items-start gap-8">
+                    <div className="flex w-[200px] shrink-0 flex-col">
+                      <h2 className="mb-3 font-[family-name:var(--font-cabinet)] text-sm font-bold uppercase tracking-wide text-text/60">
+                        Blocks ({palette.length})
+                      </h2>
+                      <div className="flex flex-col gap-2 rounded-[15px] border border-primary/30 bg-text/[0.02] p-2" style={{ minHeight: 200 }}>
+                        {palette.length === 0 ? (
+                          <p className="px-2 py-6 text-center text-xs text-text/40">
+                            all blocks placed
+                          </p>
+                        ) : (
+                          palette.map((block) => <PaletteItem key={block.id} block={block} />)
+                        )}
+                      </div>
                     </div>
 
-                    <h2 className="mb-3 font-[family-name:var(--font-cabinet)] text-xl font-bold">
-                      Choose a cover:
-                    </h2>
-
-                    <div className="mb-4 pointer-events-none">
-                      <PostCard
-                        compact
-                        post={{
-                          ...post,
-                          cover_color: coverColor,
-                          blocks: blocks,
-                          profiles: username
-                            ? { username, display_name: null, avatar_url: null }
-                            : undefined,
-                        }}
+                    <div className="w-[280px] shrink-0">
+                      <PhonePreview
+                        title={post.title || ""}
+                        placed={placed}
+                        gridRef={gridRef}
+                        gridMeta={gridMeta}
+                        onLayoutChange={onMobileLayoutChange}
+                        onRemove={handleRemove}
                       />
                     </div>
 
-                    <div className="mb-10 flex justify-center gap-3">
-                      {COVER_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          onClick={() => setCoverColor(color)}
-                          className={`size-7 rounded-full transition-all ${
-                            coverColor === color
-                              ? "ring-2 ring-accent ring-offset-2 ring-offset-bg"
-                              : "hover:scale-110"
-                          }`}
-                          style={{ backgroundColor: color }}
+                    <div className="flex w-[360px] shrink-0 flex-col">
+                      <h2 className="mb-3 font-[family-name:var(--font-cabinet)] text-xl font-bold">
+                        Add tags:
+                      </h2>
+                      <div className="mb-8 flex flex-wrap content-start items-start gap-2 rounded-[15px] border border-primary/40 p-5" style={{ minHeight: 80 }}>
+                        {tags.map((tag) => (
+                          <span
+                            key={tag}
+                            className="flex items-center gap-1 rounded-full bg-text/10 px-3 py-1.5 text-sm"
+                          >
+                            #{tag}
+                            <button
+                              onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
+                              className="ml-0.5 text-text/40 hover:text-text"
+                            >
+                              &times;
+                            </button>
+                          </span>
+                        ))}
+                        {tags.length < 3 && (
+                          <input
+                            value={tagInput}
+                            onChange={(e) => setTagInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleAddTag();
+                              }
+                            }}
+                            placeholder={tags.length === 0 ? "e.g. travel, cooking..." : "add another..."}
+                            className="flex-1 bg-transparent text-sm outline-none placeholder:text-text/30"
+                          />
+                        )}
+                      </div>
+
+                      <h2 className="mb-3 font-[family-name:var(--font-cabinet)] text-xl font-bold">
+                        Choose a cover:
+                      </h2>
+
+                      <div className="pointer-events-none mb-4">
+                        <PostCard
+                          compact
+                          post={{
+                            ...post,
+                            cover_color: coverColor,
+                            blocks: blocks,
+                            profiles: username
+                              ? { username, display_name: null, avatar_url: null }
+                              : undefined,
+                          }}
                         />
-                      ))}
-                    </div>
+                      </div>
 
-                    <div className="flex gap-3">
-                      <button
-                        onClick={handleSaveDraft}
-                        className="flex-1 rounded-[15px] border border-primary py-3 text-sm hover:border-text"
-                      >
-                        save as draft
-                      </button>
-                      <button
-                        onClick={handlePublish}
-                        className="flex-1 rounded-[15px] bg-text py-3 text-sm font-bold text-bg hover:bg-text/90"
-                      >
-                        PUBLISH
-                      </button>
+                      <div className="mb-10 flex flex-wrap justify-center gap-3">
+                        {COVER_COLORS.map((color) => (
+                          <button
+                            key={color}
+                            onClick={() => setCoverColor(color)}
+                            className={`size-7 rounded-full transition-all ${
+                              coverColor === color
+                                ? "ring-2 ring-accent ring-offset-2 ring-offset-bg"
+                                : "hover:scale-110"
+                            }`}
+                            style={{ backgroundColor: color }}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="flex gap-3">
+                        <button
+                          onClick={handleSaveDraft}
+                          className="flex-1 rounded-[15px] border border-primary py-3 text-sm hover:border-text"
+                        >
+                          save as draft
+                        </button>
+                        <button
+                          onClick={handlePublish}
+                          className="flex-1 rounded-[15px] bg-text py-3 text-sm font-bold text-bg hover:bg-text/90"
+                        >
+                          PUBLISH
+                        </button>
+                      </div>
                     </div>
                   </div>
-
-                  <div className="w-[280px] shrink-0">
-                    <MobilePhonePreview
-                      title={post.title || ""}
-                      blocks={blocks}
-                      onLayoutChange={onMobileLayoutChange}
-                    />
-                  </div>
-                </div>
+                </DndContext>
               </div>
             </div>
           </motion.div>
