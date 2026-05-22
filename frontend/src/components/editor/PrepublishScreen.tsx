@@ -290,7 +290,7 @@ function PhonePreview({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "phone" });
   const handle = username ? `@${username}` : "you";
-  const pageName = username ? `edition.app/${username}` : "edition.app";
+  const pageName = username ? `${username}'s page` : "Patches";
   const metaBits = [handle, `Week ${weekNumber}, ${year}`, `${readingMinutes} min read`];
 
   return (
