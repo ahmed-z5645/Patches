@@ -176,6 +176,31 @@ async def get_week_options(
     return options
 
 
+@router.get("/{post_id}/editor")
+async def get_post_for_editor(
+    post_id: str,
+    user_id: str = Depends(get_authenticated_user),
+    db: Client = Depends(get_db),
+):
+    result = (
+        db.table("posts")
+        .select(
+            "*, profiles!posts_user_id_fkey(username, display_name, avatar_url, is_public), blocks(*)"
+        )
+        .eq("id", post_id)
+        .single()
+        .execute()
+    )
+    if not result.data or result.data["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    result.data["blocks"] = sorted(
+        result.data.get("blocks") or [],
+        key=lambda b: b.get("sort_order", 0),
+    )
+    return result.data
+
+
 @router.get("/{post_id}")
 async def get_post(
     post_id: str,

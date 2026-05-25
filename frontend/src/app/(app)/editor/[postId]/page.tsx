@@ -15,7 +15,7 @@ export default function EditorPostPage() {
 
   const { data: post, error } = useQuery({
     queryKey: keys.post(postId),
-    queryFn: () => api.get<PostWithBlocks>(`/api/posts/${postId}`),
+    queryFn: () => api.get<PostWithBlocks>(`/api/posts/${postId}/editor`),
     enabled: !!postId,
   });
 
