@@ -16,7 +16,9 @@ export function Sidebar() {
   useEffect(() => {
     createClient()
       .auth.getUser()
-      .then(({ data }) => setUsername(data.user?.user_metadata?.username || null));
+      .then(({ data }: { data: { user: { user_metadata?: { username?: string } } | null } }) =>
+        setUsername(data.user?.user_metadata?.username || null)
+      );
   }, []);
 
   const { data: unreadData } = useQuery({

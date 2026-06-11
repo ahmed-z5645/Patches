@@ -129,7 +129,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
   const [mobileGridMeta, setMobileGridMeta] = useState({ colWidth: 0, rowHeight: 0 });
 
   useEffect(() => {
-    createClient().auth.getUser().then(({ data }) => {
+    createClient().auth.getUser().then(({ data }: { data: { user: { user_metadata?: { username?: string } } | null } }) => {
       setUsername(data.user?.user_metadata?.username || "");
     });
   }, []);
