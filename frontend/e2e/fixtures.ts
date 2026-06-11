@@ -75,16 +75,18 @@ export const test = base.extend<Fixtures>({
     await use(api);
     await api.unfreezeTime();
   },
-  loginAs: async ({}, use) => {
+  loginAs: async ({ baseURL }, use) => {
     use(async (page: Page, user: SeededUser) => {
-      // Set the Supabase session cookie via the @supabase/ssr storage shape.
-      // The exact cookie name matches the proxy.ts client; this is the seam
-      // that lets the frontend recognize the seeded test user as logged-in.
+      // Set the test-mode auth cookie. The frontend's supabase test stub
+      // (src/lib/supabase/test-mode.ts) reads `edition_test_user` as the
+      // current user id + bearer token. Middleware reads the same cookie
+      // for route protection.
+      const url = new URL(baseURL ?? "http://localhost:3100");
       await page.context().addCookies([
         {
-          name: "sb-access-token",
+          name: "edition_test_user",
           value: user.access_token,
-          domain: "localhost",
+          domain: url.hostname,
           path: "/",
           httpOnly: false,
           sameSite: "Lax",

@@ -1,30 +1,23 @@
 import { test, expect } from "./fixtures";
 
-/**
- * Smoke check — verifies the dev servers are up, the landing page renders,
- * and the unauthenticated /feed redirects to /login. Does NOT depend on the
- * backend /__test__ shim (so it runs even before the shim lands), apart from
- * the per-test `api.reset()` call which will simply 404 — wrapped to tolerate
- * that during bootstrap.
- *
- * Once the test-mode shim exists, replace the try/catch with the real call.
- */
-test.beforeEach(async ({ api }) => {
-  try {
-    await api.reset();
-  } catch {
-    // shim not mounted yet; smoke still useful as a server-up probe.
-  }
-});
+/** Sanity check: backend test-mode shim is reachable and the frontend boots. */
 
-test("landing page renders", async ({ page }) => {
-  await page.goto("/");
-  // The landing route exists in app/(public)/page.tsx; pin some visible text.
-  // If the heading copy changes, update this matcher.
-  await expect(page).toHaveTitle(/Edition/i);
+test("backend health responds with test_mode=true", async ({ request }) => {
+  const res = await request.get("http://localhost:8001/api/health");
+  expect(res.ok()).toBe(true);
+  const body = await res.json();
+  expect(body.test_mode).toBe(true);
 });
 
 test("unauthenticated /feed redirects to /login", async ({ page }) => {
   await page.goto("/feed");
   await expect(page).toHaveURL(/\/login(\?|$)/);
+});
+
+test("seed-user + login cookie lets /feed render", async ({ api, page, loginAs }) => {
+  const alice = await api.seedUser("alice");
+  await loginAs(page, alice);
+  await page.goto("/feed");
+  // We're past the login redirect — URL stays on /feed.
+  await expect(page).toHaveURL(/\/feed/);
 });
