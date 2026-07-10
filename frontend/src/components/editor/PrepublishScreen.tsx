@@ -4,20 +4,23 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   DndContext,
+  DragOverlay,
+  MeasuringStrategy,
   PointerSensor,
   TouchSensor,
+  closestCenter,
   useSensor,
   useSensors,
   useDraggable,
   useDroppable,
-  type DragEndEvent,
+  type DragStartEvent,
+  type DragOverEvent,
 } from "@dnd-kit/core";
 import type { Block, BlockStyle, Post } from "@/lib/types/blocks";
-import { isDarkColor } from "@/lib/constants/colors";
+import { COVER_COLORS, isDarkColor } from "@/lib/constants/colors";
 import { MOBILE_HIDDEN_LAYOUT, isMobileHidden, type MobileLayout } from "@/lib/types/grid";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { PostCard } from "@/components/feed/PostCard";
-import { COVER_COLORS } from "@/lib/constants/colors";
 import { DEFAULT_MOBILE_LAYOUTS } from "./EditorCanvas";
 import { countWords } from "@/lib/utils/wordcount";
 
@@ -31,345 +34,305 @@ interface PrepublishScreenProps {
   onMobileLayoutChange: (blockId: string, changes: Partial<MobileLayout>) => void;
 }
 
-function PreviewDraggableTile({
-  id,
-  layout,
-  gridMeta,
-  onResize,
-  onRemove,
-  children,
-  autoHeight,
-  blockStyle,
-}: {
-  id: string;
-  layout: MobileLayout;
-  gridMeta: { colWidth: number; rowHeight: number };
-  onResize: (id: string, changes: Partial<MobileLayout>) => void;
-  onRemove: (id: string) => void;
-  children: React.ReactNode;
-  autoHeight?: boolean;
-  blockStyle?: BlockStyle;
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id, data: { from: "phone" } });
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [isResizing, setIsResizing] = useState(false);
-  const isResizingRef = useRef(false);
-  const grownRowSpanRef = useRef(layout.rowSpan);
+// The preview renders at a real phone width, unscaled, so what the author sees
+// is exactly what BentoGridMobile/BentoTileMobile will render after publishing.
+const GAP = 12;
+const PHONE_CONTENT_WIDTH = 360;
+const COL_WIDTH = (PHONE_CONTENT_WIDTH - GAP) / 2; // 174
+const ROW_HEIGHT = COL_WIDTH / 2; // 87 — same colWidth/2 rule as the live grid
+const MAX_ROW_SPAN = 12;
 
+interface TileSize {
+  colSpan: number;
+  rowSpan: number;
+}
+
+function rowsNeededFor(contentHeight: number): number {
+  return Math.max(1, Math.ceil((contentHeight + GAP) / (ROW_HEIGHT + GAP)));
+}
+
+// Compile the ordered flow of tiles into explicit grid coordinates. Full-width
+// tiles take their own row band; consecutive half-width tiles pair up side by
+// side. Overlaps and stray gaps are impossible by construction.
+function packLayouts(order: string[], sizes: Record<string, TileSize>): Map<string, MobileLayout> {
+  const out = new Map<string, MobileLayout>();
+  let cursor = 1;
+  let pending: { rowSpan: number } | null = null;
+  for (const id of order) {
+    const size = sizes[id] ?? { colSpan: 1, rowSpan: 2 };
+    const colSpan = Math.max(1, Math.min(2, size.colSpan));
+    const rowSpan = Math.max(1, size.rowSpan);
+    if (colSpan === 2) {
+      if (pending) {
+        cursor += pending.rowSpan;
+        pending = null;
+      }
+      out.set(id, { colStart: 1, colSpan: 2, rowStart: cursor, rowSpan });
+      cursor += rowSpan;
+    } else if (!pending) {
+      out.set(id, { colStart: 1, colSpan: 1, rowStart: cursor, rowSpan });
+      pending = { rowSpan };
+    } else {
+      out.set(id, { colStart: 2, colSpan: 1, rowStart: cursor, rowSpan });
+      cursor += Math.max(pending.rowSpan, rowSpan);
+      pending = null;
+    }
+  }
+  return out;
+}
+
+function defaultSizeFor(type: string): TileSize {
+  const def = DEFAULT_MOBILE_LAYOUTS[type] || { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 };
+  return {
+    colSpan: Math.max(1, Math.min(2, def.colSpan)),
+    rowSpan: Math.max(1, def.rowSpan),
+  };
+}
+
+// Derive the starting arrangement from what's already saved. Blocks with a
+// real mobile layout keep it (ordered top-to-bottom); blocks the author hid on
+// a previous visit stay hidden. Only when nothing is placed at all do we start
+// fresh with every block, in desktop reading order.
+function initialArrangement(blocks: Block[]): { order: string[]; sizes: Record<string, TileSize> } {
+  const tops = blocks.filter((b) => !b.parent_block_id);
+  const placed = tops.filter((b) => !isMobileHidden(b.grid_layout_mobile));
+  const fresh = placed.length === 0;
+  const source = fresh ? tops : placed;
+  const sorted = [...source].sort((a, b) => {
+    const la = fresh ? a.grid_layout_desktop : a.grid_layout_mobile;
+    const lb = fresh ? b.grid_layout_desktop : b.grid_layout_mobile;
+    return la.rowStart - lb.rowStart || la.colStart - lb.colStart;
+  });
+  const sizes: Record<string, TileSize> = {};
+  for (const b of tops) {
+    if (!fresh && !isMobileHidden(b.grid_layout_mobile)) {
+      sizes[b.id] = {
+        colSpan: Math.max(1, Math.min(2, b.grid_layout_mobile.colSpan)),
+        rowSpan: Math.max(1, b.grid_layout_mobile.rowSpan),
+      };
+    } else {
+      sizes[b.id] = defaultSizeFor(b.type);
+    }
+  }
+  return { order: sorted.map((b) => b.id), sizes };
+}
+
+function sameLayout(a: MobileLayout, b: MobileLayout): boolean {
+  return (
+    a.colStart === b.colStart &&
+    a.colSpan === b.colSpan &&
+    a.rowStart === b.rowStart &&
+    a.rowSpan === b.rowSpan
+  );
+}
+
+function tileChromeStyle(blockStyle?: BlockStyle) {
+  const bgColor = blockStyle?.background_color;
+  const dark = isDarkColor(bgColor);
+  return {
+    style: {
+      ...(bgColor ? { backgroundColor: bgColor } : {}),
+      ...(dark ? { color: "#eff1f3" } : {}),
+    },
+    bgClass: bgColor ? "" : "bg-bg",
+    borderClass: blockStyle?.borderless ? "" : "border border-primary",
+  };
+}
+
+function ControlButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      // The whole tile is a drag handle — stop the gesture so dnd-kit doesn't claim it.
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="flex size-6 items-center justify-center rounded-full border border-primary/40 bg-bg/90 text-text/70 shadow-sm backdrop-blur hover:text-text"
+    >
+      {children}
+    </button>
+  );
+}
+
+function PhoneTile({
+  block,
+  layout,
+  autoHeight,
+  selected,
+  animate,
+  onSelect,
+  onToggleWidth,
+  onRowsDelta,
+  onHide,
+  onAutoRows,
+}: {
+  block: Block;
+  layout: MobileLayout;
+  autoHeight: boolean;
+  selected: boolean;
+  animate: boolean;
+  onSelect: (id: string) => void;
+  onToggleWidth: (id: string) => void;
+  onRowsDelta: (id: string, delta: number) => void;
+  onHide: (id: string) => void;
+  onAutoRows: (id: string, rows: number) => void;
+}) {
+  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({
+    id: block.id,
+  });
+  const { setNodeRef: setDropRef } = useDroppable({ id: block.id });
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  const setRefs = useCallback(
+    (node: HTMLElement | null) => {
+      setDragRef(node);
+      setDropRef(node);
+    },
+    [setDragRef, setDropRef]
+  );
+
+  // Markdown tiles size themselves to their content, exactly like the live
+  // viewer does. The content's height doesn't depend on the tile's rowSpan
+  // (it flows naturally), so this converges in a single step — no feedback
+  // loop with any manual control.
   useEffect(() => {
     if (!autoHeight) return;
     const el = contentRef.current;
     if (!el) return;
-    let raf: number | null = null;
 
     function measure() {
-      raf = null;
-      if (isResizingRef.current) return;
-      const grid = el!.closest("[data-preview-grid]") as HTMLElement | null;
-      if (!grid) return;
-      const rowHeight = parseFloat(grid.style.gridAutoRows);
-      if (!rowHeight || isNaN(rowHeight)) return;
-      const gap = 12;
-      const dragHandleHeight = 16;
-      const scaledContentHeight = el!.scrollHeight * 0.7;
-      const needed = Math.ceil(
-        (scaledContentHeight + dragHandleHeight + gap) / (rowHeight + gap)
-      );
-      if (layout.rowSpan > grownRowSpanRef.current) {
-        grownRowSpanRef.current = layout.rowSpan;
-      }
-      const target = Math.max(needed, layout.rowSpan);
-      if (target > grownRowSpanRef.current) {
-        grownRowSpanRef.current = target;
-        onResize(id, { rowSpan: target });
-      }
+      const h = el!.scrollHeight;
+      if (!h) return;
+      onAutoRows(block.id, rowsNeededFor(h));
     }
 
-    function schedule() {
-      if (raf != null) return;
-      raf = requestAnimationFrame(measure);
-    }
-
-    schedule();
-    const obs = new ResizeObserver(schedule);
+    measure();
+    const obs = new ResizeObserver(measure);
     obs.observe(el);
-    return () => {
-      obs.disconnect();
-      if (raf != null) cancelAnimationFrame(raf);
-    };
-  }, [autoHeight, id, layout.rowSpan, onResize]);
+    return () => obs.disconnect();
+  }, [autoHeight, block.id, onAutoRows]);
 
-  const handleResizeCorner = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const target = e.currentTarget as HTMLElement;
-      target.setPointerCapture(e.pointerId);
-      setIsResizing(true);
-      isResizingRef.current = true;
-      const startX = e.clientX;
-      const startY = e.clientY;
-      const startColSpan = layout.colSpan;
-      const startRowSpan = layout.rowSpan;
-      let lastColSpan = startColSpan;
-      let lastRowSpan = startRowSpan;
-      const gap = 12;
-
-      // Minimum rows needed to show the block's content without clipping.
-      // Content is rendered at scale(0.7) inside the tile, plus a 16px drag handle.
-      const dragHandleHeight = 16;
-      const contentEl = contentRef.current;
-      const minRowSpan = contentEl && gridMeta.rowHeight
-        ? Math.max(
-            1,
-            Math.ceil(
-              (contentEl.scrollHeight * 0.7 + dragHandleHeight + gap) /
-                (gridMeta.rowHeight + gap)
-            )
-          )
-        : 1;
-
-      function onMove(ev: PointerEvent) {
-        const dx = ev.clientX - startX;
-        const dy = ev.clientY - startY;
-        const colDelta = Math.round(dx / (gridMeta.colWidth + gap));
-        const rowDelta = Math.round(dy / (gridMeta.rowHeight + gap));
-        const newColSpan = Math.max(1, Math.min(3 - layout.colStart, startColSpan + colDelta));
-        const newRowSpan = Math.max(minRowSpan, startRowSpan + rowDelta);
-        if (newColSpan !== lastColSpan || newRowSpan !== lastRowSpan) {
-          lastColSpan = newColSpan;
-          lastRowSpan = newRowSpan;
-          onResize(id, { colSpan: newColSpan, rowSpan: newRowSpan });
-        }
-      }
-
-      function onUp() {
-        target.removeEventListener("pointermove", onMove);
-        target.removeEventListener("pointerup", onUp);
-        setIsResizing(false);
-        isResizingRef.current = false;
-        grownRowSpanRef.current = lastRowSpan;
-      }
-
-      target.addEventListener("pointermove", onMove);
-      target.addEventListener("pointerup", onUp);
-    },
-    [id, layout, gridMeta, onResize]
-  );
-
-  const handleRemovePointerDown = useCallback((e: React.PointerEvent) => {
-    // Whole tile is a drag handle — stop the gesture so dnd-kit doesn't claim it.
-    e.stopPropagation();
-  }, []);
-
-  const handleRemoveClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onRemove(id);
-    },
-    [id, onRemove]
-  );
-
-  const borderless = blockStyle?.borderless;
-  const bgColor = blockStyle?.background_color;
-  const dark = isDarkColor(bgColor);
-  const active = isDragging || isResizing;
-  const style = {
-    gridColumn: `${layout.colStart} / span ${layout.colSpan}`,
-    gridRow: `${layout.rowStart} / span ${layout.rowSpan}`,
-    x: transform?.x ?? 0,
-    y: transform?.y ?? 0,
-    zIndex: active ? 50 : undefined,
-    touchAction: "none" as const,
-    ...(bgColor ? { backgroundColor: bgColor } : {}),
-    ...(dark ? { color: "#eff1f3" } : {}),
-  };
-  const tileBgClass = bgColor ? "" : "bg-bg";
-  const tileBorderClass = borderless ? "" : "border border-primary/50";
-  const handleBorderClass = borderless ? "" : "border-b border-primary/20";
+  const chrome = tileChromeStyle(block.style);
+  const isFull = layout.colSpan === 2;
 
   return (
     <motion.div
-      ref={setNodeRef}
-      layout={!active}
-      style={style}
+      ref={setRefs}
+      layout={animate ? "position" : false}
+      transition={{ layout: { type: "spring", stiffness: 400, damping: 32 } }}
       {...listeners}
       {...attributes}
-      animate={{ opacity: isDragging ? 0.7 : 1, scale: isDragging ? 1.03 : 1 }}
-      transition={{ duration: 0.15, x: { duration: 0 }, y: { duration: 0 }, scale: { type: "spring", stiffness: 300, damping: 15 }, layout: { type: "spring", stiffness: 200, damping: 18, mass: 1.2 } }}
-      className={`group/tile relative cursor-grab active:cursor-grabbing ${autoHeight ? "" : "overflow-hidden"} rounded-[8px] ${tileBorderClass} ${tileBgClass}`}
+      onClick={() => onSelect(block.id)}
+      style={{
+        gridColumn: `${layout.colStart} / span ${layout.colSpan}`,
+        gridRow: `${layout.rowStart} / span ${layout.rowSpan}`,
+        touchAction: "none",
+        minWidth: 0,
+        ...chrome.style,
+      }}
+      className={`group/tile relative cursor-grab rounded-[15px] active:cursor-grabbing ${chrome.bgClass} ${chrome.borderClass} ${
+        autoHeight ? "" : "overflow-hidden"
+      } ${isDragging ? "opacity-30" : ""} ${selected ? "ring-2 ring-accent" : ""}`}
     >
-      <div
-        className={`flex h-4 items-center justify-center ${handleBorderClass}`}
-      >
-        <div className="flex gap-px">
-          <span className="size-[3px] rounded-full bg-text/20" />
-          <span className="size-[3px] rounded-full bg-text/20" />
-          <span className="size-[3px] rounded-full bg-text/20" />
-        </div>
+      <div ref={contentRef} className={`pointer-events-none select-none ${autoHeight ? "" : "h-full"}`}>
+        <BlockRenderer block={block} />
       </div>
-      <div ref={contentRef} className={autoHeight ? "" : "h-[calc(100%-16px)] overflow-hidden"}>{children}</div>
-      <button
-        type="button"
-        onPointerDown={handleRemovePointerDown}
-        onClick={handleRemoveClick}
-        aria-label="Remove from mobile layout"
-        className="absolute right-1 top-1 z-10 flex size-4 items-center justify-center rounded-full bg-text/70 text-bg opacity-0 transition-opacity group-hover/tile:opacity-100"
-      >
-        <svg viewBox="0 0 10 10" className="size-2">
-          <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
-      </button>
+
       <div
-        onPointerDown={handleResizeCorner}
-        className="absolute bottom-0 right-0 flex size-7 cursor-nwse-resize items-end justify-end p-1"
+        className={`absolute right-1.5 top-1.5 z-10 flex gap-1 transition-opacity ${
+          selected ? "opacity-100" : "opacity-0 group-hover/tile:opacity-100 group-focus-within/tile:opacity-100"
+        }`}
       >
-        <svg viewBox="0 0 10 10" className="size-2.5 text-text/40">
-          <path d="M9 1v8H1" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
+        <ControlButton
+          label={isFull ? "Make half width" : "Make full width"}
+          onClick={() => onToggleWidth(block.id)}
+        >
+          {isFull ? (
+            <svg viewBox="0 0 14 14" className="size-3">
+              <path
+                d="M6 4L4 7l2 3M8 4l2 3-2 3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 14 14" className="size-3">
+              <path
+                d="M4 4L2 7l2 3M10 4l2 3-2 3M2 7h10"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
+        </ControlButton>
+        {!autoHeight && (
+          <>
+            <ControlButton label="Decrease tile height" onClick={() => onRowsDelta(block.id, -1)}>
+              <svg viewBox="0 0 14 14" className="size-3">
+                <path d="M3 7h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </ControlButton>
+            <ControlButton label="Increase tile height" onClick={() => onRowsDelta(block.id, 1)}>
+              <svg viewBox="0 0 14 14" className="size-3">
+                <path d="M7 3v8M3 7h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </ControlButton>
+          </>
+        )}
+        <ControlButton label="Hide on mobile" onClick={() => onHide(block.id)}>
+          <svg viewBox="0 0 14 14" className="size-3">
+            <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </ControlButton>
       </div>
     </motion.div>
   );
 }
 
-function PaletteItem({ block }: { block: Block }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: block.id, data: { from: "palette", type: block.type } });
-  const style = {
-    x: transform?.x ?? 0,
-    y: transform?.y ?? 0,
-    zIndex: isDragging ? 50 : undefined,
-    touchAction: "none" as const,
-  };
+function HiddenBlockCard({ block, onShow }: { block: Block; onShow: (id: string) => void }) {
   return (
-    <motion.div
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      {...attributes}
-      animate={{ opacity: isDragging ? 0.7 : 1, scale: isDragging ? 1.03 : 1 }}
-      transition={{ duration: 0.15, x: { duration: 0 }, y: { duration: 0 } }}
-      className="group/palette cursor-grab overflow-hidden rounded-[10px] border border-primary/50 bg-bg active:cursor-grabbing"
-    >
+    <div className="overflow-hidden rounded-[10px] border border-primary/50 bg-bg">
       <div className="flex items-center justify-between border-b border-primary/20 px-2 py-1">
         <span className="text-[10px] uppercase tracking-wide text-text/60">{block.type}</span>
-        <span className="text-[10px] text-text/30">drag</span>
+        <button
+          type="button"
+          aria-label="Show on mobile"
+          title="Show on mobile"
+          onClick={() => onShow(block.id)}
+          className="flex size-5 items-center justify-center rounded-full text-text/50 hover:bg-text/10 hover:text-text"
+        >
+          <svg viewBox="0 0 14 14" className="size-3">
+            <path d="M7 3v8M3 7h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
       </div>
-      <div className="pointer-events-none h-[90px] overflow-hidden">
-        <div style={{ width: "200%", height: "200%", transform: "scale(0.5)", transformOrigin: "top left" }}>
+      <button
+        type="button"
+        onClick={() => onShow(block.id)}
+        className="block h-[72px] w-full cursor-pointer overflow-hidden text-left"
+      >
+        <div className="pointer-events-none" style={{ width: "200%", height: "200%", transform: "scale(0.5)", transformOrigin: "top left" }}>
           <BlockRenderer block={block} />
         </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function PhonePreview({
-  title,
-  username,
-  weekNumber,
-  year,
-  readingMinutes,
-  placed,
-  gridRef,
-  gridMeta,
-  onLayoutChange,
-  onRemove,
-}: {
-  title: string;
-  username: string;
-  weekNumber: number;
-  year: number;
-  readingMinutes: number;
-  placed: Block[];
-  gridRef: React.RefObject<HTMLDivElement | null>;
-  gridMeta: { colWidth: number; rowHeight: number };
-  onLayoutChange: (id: string, changes: Partial<MobileLayout>) => void;
-  onRemove: (id: string) => void;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: "phone" });
-  const handle = username ? `@${username}` : "you";
-  const pageName = username ? `${username}'s page` : "Patches";
-  const metaBits = [handle, `Week ${weekNumber}, ${year}`, `${readingMinutes} min read`];
-
-  return (
-    <div
-      className="rounded-[40px] border-[5px] border-text/80 bg-bg"
-      style={{ aspectRatio: "393 / 852" }}
-    >
-      <div className="flex h-full flex-col px-3 pt-2 pb-3">
-        <div className="mx-auto mb-2 h-4 w-20 rounded-full bg-text/80" />
-
-        <div className="mb-2 flex items-center gap-2 px-1">
-          <svg width="12" height="12" viewBox="0 0 12 12" className="text-text/60">
-            <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-          </svg>
-          <span className="truncate text-[10px] text-text/60">{pageName}</span>
-        </div>
-
-        <div ref={setNodeRef} className={`flex-1 overflow-y-auto rounded-[12px] px-1 transition-colors ${isOver ? "bg-accent/10" : ""}`}>
-          <h2 className="mb-1 font-[family-name:var(--font-cabinet)] text-base font-bold leading-tight">
-            {title || "Untitled"}
-          </h2>
-          <p className="mb-3 text-[8px] text-text/40">
-            {metaBits.join(" · ")}
-          </p>
-
-          <div
-            ref={gridRef}
-            data-preview-grid
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gridAutoRows: gridMeta.rowHeight || 60,
-              gap: 12,
-              minHeight: placed.length === 0 ? 200 : undefined,
-            }}
-          >
-            {placed.length === 0 && (
-              <div className="col-span-2 flex h-[200px] items-center justify-center rounded-[12px] border border-dashed border-text/20">
-                <p className="text-center text-[10px] text-text/40">
-                  drag blocks here<br />to place them on mobile
-                </p>
-              </div>
-            )}
-            {placed.map((block) => (
-              <PreviewDraggableTile
-                key={block.id}
-                id={block.id}
-                layout={block.grid_layout_mobile}
-                gridMeta={gridMeta}
-                onResize={onLayoutChange}
-                onRemove={onRemove}
-                autoHeight={block.type === "markdown"}
-                blockStyle={block.style}
-              >
-                <div className="pointer-events-none h-full overflow-hidden">
-                  <div style={{ width: "142.86%", height: "142.86%", transform: "scale(0.7)", transformOrigin: "top left" }}>
-                    <BlockRenderer block={block} />
-                  </div>
-                </div>
-              </PreviewDraggableTile>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-2 flex items-center justify-around border-t border-primary/30 pt-2">
-          <svg width="16" height="16" viewBox="0 0 24 24" className="text-text/40 rotate-45">
-            <path d="M12 2a8 8 0 018 8c0 5-8 14-8 14S4 15 4 10a8 8 0 018-8z" fill="none" stroke="currentColor" strokeWidth="2" />
-          </svg>
-          <svg width="16" height="16" viewBox="0 0 24 24" className="text-text/40">
-            <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-          <svg width="16" height="16" viewBox="0 0 24 24" className="text-text/40">
-            <circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
-            <path d="M4 20c0-4 4-7 8-7s8 3 8 7" fill="none" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        </div>
-
-        <div className="mx-auto mt-1 h-1 w-20 rounded-full bg-text/20" />
-      </div>
+      </button>
     </div>
   );
 }
@@ -383,50 +346,28 @@ export function PrepublishScreen({
   onCancel,
   onMobileLayoutChange,
 }: PrepublishScreenProps) {
-  const [visible, setVisible] = useState(false);
+  // Starts true — the motion.div's initial→animate handles the entrance;
+  // setting it false plays the exit through AnimatePresence.
+  const [visible, setVisible] = useState(true);
   const [coverColor, setCoverColor] = useState(post.cover_color || COVER_COLORS[0]);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
-  const gridRef = useRef<HTMLDivElement>(null);
-  const [gridMeta, setGridMeta] = useState({ colWidth: 0, rowHeight: 0 });
-  const didResetRef = useRef(false);
 
-  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 5 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
-  const sensors = useSensors(touchSensor, pointerSensor);
+  const [initial] = useState(() => initialArrangement(blocks));
+  const [order, setOrder] = useState<string[]>(initial.order);
+  const [sizes, setSizes] = useState<Record<string, TileSize>>(initial.sizes);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    setVisible(true);
-  }, []);
-
-  // Reset every top-level block to "unplaced" exactly once on mount so the
-  // phone starts empty and the palette shows every block.
-  useEffect(() => {
-    if (didResetRef.current) return;
-    didResetRef.current = true;
-    for (const b of blocks) {
-      if (b.parent_block_id) continue;
-      if (!isMobileHidden(b.grid_layout_mobile)) {
-        onMobileLayoutChange(b.id, MOBILE_HIDDEN_LAYOUT);
-      }
-    }
-  }, [blocks, onMobileLayoutChange]);
-
-  useEffect(() => {
-    function update() {
-      if (!gridRef.current) return;
-      const w = gridRef.current.clientWidth;
-      const gap = 12;
-      const colWidth = (w - gap) / 2;
-      setGridMeta({ colWidth, rowHeight: colWidth / 2 });
-    }
-    update();
-    const obs = new ResizeObserver(update);
-    if (gridRef.current) obs.observe(gridRef.current);
-    return () => obs.disconnect();
-  }, [visible]);
+  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 6 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } });
+  const sensors = useSensors(pointerSensor, touchSensor);
 
   const topLevel = useMemo(() => blocks.filter((b) => !b.parent_block_id), [blocks]);
+  const blockById = useMemo(() => new Map(topLevel.map((b) => [b.id, b])), [topLevel]);
+  const hidden = useMemo(() => topLevel.filter((b) => !order.includes(b.id)), [topLevel, order]);
+  const layouts = useMemo(() => packLayouts(order, sizes), [order, sizes]);
+
   const readingMinutes = useMemo(() => {
     const words = blocks
       .filter((b) => b.type === "markdown" && !b.parent_block_id)
@@ -436,102 +377,86 @@ export function PrepublishScreen({
       );
     return Math.max(1, Math.round(words / 200));
   }, [blocks]);
-  const palette = useMemo(
-    () => topLevel.filter((b) => isMobileHidden(b.grid_layout_mobile)),
-    [topLevel]
-  );
-  const placed = useMemo(
-    () => topLevel.filter((b) => !isMobileHidden(b.grid_layout_mobile)),
-    [topLevel]
-  );
 
-  function findEmptyCell(): { colStart: number; rowStart: number } {
-    // First-fit scan, columns left-to-right within each row.
-    for (let r = 1; r <= 100; r++) {
-      for (let c = 1; c <= 2; c++) {
-        const occupied = placed.some((b) => {
-          const l = b.grid_layout_mobile;
-          return (
-            c >= l.colStart &&
-            c < l.colStart + l.colSpan &&
-            r >= l.rowStart &&
-            r < l.rowStart + l.rowSpan
-          );
-        });
-        if (!occupied) return { colStart: c, rowStart: r };
+  // Single persistence path: whatever the packed layout says a block should
+  // be, write it upstream when it differs from what's saved. Every mutation
+  // (reorder, resize, hide, show) funnels through this diff, so the editor
+  // state can never drift from what the phone preview shows.
+  useEffect(() => {
+    for (const b of topLevel) {
+      const desired = layouts.get(b.id) ?? MOBILE_HIDDEN_LAYOUT;
+      if (!sameLayout(b.grid_layout_mobile, desired)) {
+        onMobileLayoutChange(b.id, desired);
       }
     }
-    return { colStart: 1, rowStart: 1 };
+  }, [layouts, topLevel, onMobileLayoutChange]);
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(event.active.id as string);
+    setSelectedId(null);
   }
 
-  function snapToCell(clientX: number, clientY: number): { colStart: number; rowStart: number } | null {
-    if (!gridRef.current || !gridMeta.colWidth || !gridMeta.rowHeight) return null;
-    const rect = gridRef.current.getBoundingClientRect();
-    const gap = 12;
-    const relX = clientX - rect.left;
-    const relY = clientY - rect.top;
-    const colStart = Math.max(1, Math.min(2, Math.floor(relX / (gridMeta.colWidth + gap)) + 1));
-    const rowStart = Math.max(1, Math.floor(relY / (gridMeta.rowHeight + gap)) + 1);
-    return { colStart, rowStart };
+  // Live reorder: as the dragged tile crosses another tile, move it to that
+  // slot and let the grid repack. The dragged tile's own slot then sits under
+  // the pointer, which naturally stabilizes the gesture.
+  function handleDragOver(event: DragOverEvent) {
+    const { active, over } = event;
+    if (!over || over.id === active.id) return;
+    setOrder((prev) => {
+      const from = prev.indexOf(active.id as string);
+      const to = prev.indexOf(over.id as string);
+      if (from === -1 || to === -1 || from === to) return prev;
+      const next = [...prev];
+      next.splice(from, 1);
+      next.splice(to, 0, active.id as string);
+      return next;
+    });
   }
 
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over, delta, activatorEvent } = event;
-    const blockId = active.id as string;
-    const from = (active.data.current as { from?: string } | undefined)?.from;
-
-    if (from === "palette") {
-      if (over?.id !== "phone") return;
-      const block = blocks.find((b) => b.id === blockId);
-      if (!block) return;
-      const defaults =
-        DEFAULT_MOBILE_LAYOUTS[block.type] || { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 };
-
-      // Snap to the cell under the pointer when we can read it; otherwise
-      // fall back to the next empty cell.
-      let placement: { colStart: number; rowStart: number } | null = null;
-      const e = activatorEvent as PointerEvent | TouchEvent | MouseEvent;
-      let startX: number | null = null;
-      let startY: number | null = null;
-      if (e && "clientX" in e && typeof e.clientX === "number") {
-        startX = e.clientX;
-        startY = (e as PointerEvent).clientY;
-      } else if (e && "touches" in e && e.touches?.[0]) {
-        startX = e.touches[0].clientX;
-        startY = e.touches[0].clientY;
-      }
-      if (startX != null && startY != null) {
-        placement = snapToCell(startX + delta.x, startY + delta.y);
-      }
-      if (!placement) placement = findEmptyCell();
-
-      const colSpan = Math.min(defaults.colSpan, 3 - placement.colStart);
-      onMobileLayoutChange(blockId, {
-        colStart: placement.colStart,
-        rowStart: placement.rowStart,
-        colSpan: Math.max(1, colSpan),
-        rowSpan: defaults.rowSpan,
-      });
-      return;
-    }
-
-    // from === "phone" — move within the phone grid (existing snap logic).
-    if (!gridMeta.colWidth || !gridMeta.rowHeight) return;
-    const block = topLevel.find((b) => b.id === blockId);
-    if (!block) return;
-    const layout = block.grid_layout_mobile;
-    const gap = 12;
-    const colDelta = Math.round(delta.x / (gridMeta.colWidth + gap));
-    const rowDelta = Math.round(delta.y / (gridMeta.rowHeight + gap));
-    if (colDelta === 0 && rowDelta === 0) return;
-    const newColStart = Math.max(1, Math.min(3 - layout.colSpan, layout.colStart + colDelta));
-    const newRowStart = Math.max(1, layout.rowStart + rowDelta);
-    onMobileLayoutChange(blockId, { colStart: newColStart, rowStart: newRowStart });
+  function handleDragEnd() {
+    setActiveId(null);
   }
 
-  function handleRemove(id: string) {
-    onMobileLayoutChange(id, MOBILE_HIDDEN_LAYOUT);
-  }
+  const handleToggleWidth = useCallback((id: string) => {
+    setSizes((prev) => {
+      const cur = prev[id] ?? { colSpan: 1, rowSpan: 2 };
+      return { ...prev, [id]: { ...cur, colSpan: cur.colSpan === 2 ? 1 : 2 } };
+    });
+  }, []);
+
+  const handleRowsDelta = useCallback((id: string, delta: number) => {
+    setSizes((prev) => {
+      const cur = prev[id] ?? { colSpan: 1, rowSpan: 2 };
+      const rowSpan = Math.max(1, Math.min(MAX_ROW_SPAN, cur.rowSpan + delta));
+      if (rowSpan === cur.rowSpan) return prev;
+      return { ...prev, [id]: { ...cur, rowSpan } };
+    });
+  }, []);
+
+  const handleAutoRows = useCallback((id: string, rows: number) => {
+    setSizes((prev) => {
+      const cur = prev[id] ?? { colSpan: 1, rowSpan: 2 };
+      if (cur.rowSpan === rows) return prev;
+      return { ...prev, [id]: { ...cur, rowSpan: rows } };
+    });
+  }, []);
+
+  const handleHide = useCallback((id: string) => {
+    setOrder((prev) => prev.filter((x) => x !== id));
+    setSelectedId((prev) => (prev === id ? null : prev));
+  }, []);
+
+  const handleShow = useCallback(
+    (id: string) => {
+      setSizes((prev) => (prev[id] ? prev : { ...prev, [id]: defaultSizeFor(blockById.get(id)?.type || "markdown") }));
+      setOrder((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    },
+    [blockById]
+  );
+
+  const handleSelect = useCallback((id: string) => {
+    setSelectedId((prev) => (prev === id ? null : id));
+  }, []);
 
   function handleCancel() {
     setVisible(false);
@@ -555,6 +480,15 @@ export function PrepublishScreen({
     setVisible(false);
     setTimeout(onSaveDraft, 300);
   }
+
+  const activeBlock = activeId ? blockById.get(activeId) : null;
+  const activeChrome = activeBlock ? tileChromeStyle(activeBlock.style) : null;
+  const handle = username ? `@${username}` : "you";
+  const pageName = username ? `${username}'s page` : "Patches";
+  const metaBits = [handle, `Week ${post.week_number}, ${post.year}`, `${readingMinutes} min read`];
+  const orderedBlocks = order
+    .map((id) => blockById.get(id))
+    .filter((b): b is Block => !!b);
 
   return (
     <AnimatePresence>
@@ -592,39 +526,109 @@ export function PrepublishScreen({
                   Ready to publish?
                 </h1>
                 <p className="mb-8 max-w-2xl text-sm text-text/70">
-                  Drag blocks from the palette on the left into the phone to arrange your mobile layout. Anything left in the palette will be hidden on mobile (still visible on desktop). Then pick your tags and cover.
+                  This is exactly how your post will look on phones. Drag tiles to reorder them,
+                  and use each tile&apos;s controls to change its width or height — or hide it from
+                  mobile entirely. Then pick your tags and cover.
                 </p>
 
-                <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDragEnd={handleDragEnd}
+                  onDragCancel={handleDragEnd}
+                >
                   <div className="flex items-start gap-8">
-                    <div className="flex w-[200px] shrink-0 flex-col">
+                    <div className="flex w-[190px] shrink-0 flex-col">
                       <h2 className="mb-3 font-[family-name:var(--font-cabinet)] text-sm font-bold uppercase tracking-wide text-text/60">
-                        Blocks ({palette.length})
+                        Hidden on mobile ({hidden.length})
                       </h2>
-                      <div className="flex flex-col gap-2 rounded-[15px] border border-primary/30 bg-text/[0.02] p-2" style={{ minHeight: 200 }}>
-                        {palette.length === 0 ? (
+                      <div className="flex flex-col gap-2 rounded-[15px] border border-primary/30 bg-text/[0.02] p-2" style={{ minHeight: 120 }}>
+                        {hidden.length === 0 ? (
                           <p className="px-2 py-6 text-center text-xs text-text/40">
-                            all blocks placed
+                            hide a tile and it&apos;ll land here — hidden tiles still show on desktop
                           </p>
                         ) : (
-                          palette.map((block) => <PaletteItem key={block.id} block={block} />)
+                          hidden.map((block) => (
+                            <HiddenBlockCard key={block.id} block={block} onShow={handleShow} />
+                          ))
                         )}
                       </div>
                     </div>
 
-                    <div className="w-[280px] shrink-0">
-                      <PhonePreview
-                        title={post.title || ""}
-                        username={username}
-                        weekNumber={post.week_number}
-                        year={post.year}
-                        readingMinutes={readingMinutes}
-                        placed={placed}
-                        gridRef={gridRef}
-                        gridMeta={gridMeta}
-                        onLayoutChange={onMobileLayoutChange}
-                        onRemove={handleRemove}
-                      />
+                    <div className="sticky top-0 shrink-0 self-start">
+                      <div className="rounded-[44px] border-[6px] border-text/80 bg-bg shadow-xl">
+                        <div className="flex flex-col px-3 pb-3 pt-2" style={{ width: PHONE_CONTENT_WIDTH + 24 }}>
+                          <div className="mx-auto mb-2 h-4 w-20 rounded-full bg-text/80" />
+
+                          <div className="mb-2 flex items-center gap-2 px-1">
+                            <svg width="12" height="12" viewBox="0 0 12 12" className="text-text/60">
+                              <path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+                            </svg>
+                            <span className="truncate text-xs text-text/60">{pageName}</span>
+                          </div>
+
+                          <div className="min-h-[420px] overflow-y-auto overscroll-contain rounded-[12px] pb-4" style={{ height: "calc(100vh - 260px)" }}>
+                            <h2 className="mb-1 font-[family-name:var(--font-cabinet)] text-xl font-bold leading-tight">
+                              {post.title || "Untitled"}
+                            </h2>
+                            <p className="mb-3 text-[11px] text-text/40">
+                              {metaBits.join(" · ")}
+                            </p>
+
+                            {orderedBlocks.length === 0 ? (
+                              <div className="flex h-[200px] items-center justify-center rounded-[12px] border border-dashed border-text/20">
+                                <p className="px-6 text-center text-xs text-text/40">
+                                  nothing to show on mobile yet — add tiles back from the hidden list
+                                </p>
+                              </div>
+                            ) : (
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: `repeat(2, ${COL_WIDTH}px)`,
+                                  gridAutoRows: ROW_HEIGHT,
+                                  gap: GAP,
+                                  width: PHONE_CONTENT_WIDTH,
+                                }}
+                              >
+                                {orderedBlocks.map((block) => (
+                                  <PhoneTile
+                                    key={block.id}
+                                    block={block}
+                                    layout={layouts.get(block.id)!}
+                                    autoHeight={block.type === "markdown"}
+                                    selected={selectedId === block.id}
+                                    animate={activeId === null}
+                                    onSelect={handleSelect}
+                                    onToggleWidth={handleToggleWidth}
+                                    onRowsDelta={handleRowsDelta}
+                                    onHide={handleHide}
+                                    onAutoRows={handleAutoRows}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-2 flex items-center justify-around border-t border-primary/30 pt-2">
+                            <svg width="16" height="16" viewBox="0 0 24 24" className="rotate-45 text-text/40">
+                              <path d="M12 2a8 8 0 018 8c0 5-8 14-8 14S4 15 4 10a8 8 0 018-8z" fill="none" stroke="currentColor" strokeWidth="2" />
+                            </svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" className="text-text/40">
+                              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                            </svg>
+                            <svg width="16" height="16" viewBox="0 0 24 24" className="text-text/40">
+                              <circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+                              <path d="M4 20c0-4 4-7 8-7s8 3 8 7" fill="none" stroke="currentColor" strokeWidth="2" />
+                            </svg>
+                          </div>
+
+                          <div className="mx-auto mt-1 h-1 w-20 rounded-full bg-text/20" />
+                        </div>
+                      </div>
                     </div>
 
                     <div className="flex w-[360px] shrink-0 flex-col">
@@ -711,6 +715,19 @@ export function PrepublishScreen({
                       </div>
                     </div>
                   </div>
+
+                  <DragOverlay dropAnimation={{ duration: 200, easing: "ease" }}>
+                    {activeBlock && activeChrome && (
+                      <div
+                        className={`h-full w-full cursor-grabbing rounded-[15px] shadow-2xl ${activeChrome.bgClass} ${activeChrome.borderClass} overflow-hidden`}
+                        style={activeChrome.style}
+                      >
+                        <div className="pointer-events-none h-full select-none">
+                          <BlockRenderer block={activeBlock} />
+                        </div>
+                      </div>
+                    )}
+                  </DragOverlay>
                 </DndContext>
               </div>
             </div>

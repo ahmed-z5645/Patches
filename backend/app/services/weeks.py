@@ -3,6 +3,20 @@ from zoneinfo import ZoneInfo
 
 EASTERN = ZoneInfo("America/New_York")
 
+# When set (only in EDITION_TEST_MODE), every _now() call returns this instant
+# so e2e specs can step the clock across the Mon 09:00 ET reveal boundary.
+_FROZEN_NOW: datetime | None = None
+
+
+def freeze_now(instant: datetime | None) -> None:
+    """Pin process-wide 'now' for the edition clock. Pass None to release."""
+    global _FROZEN_NOW
+    _FROZEN_NOW = instant.astimezone(EASTERN) if instant is not None else None
+
+
+def _now() -> datetime:
+    return _FROZEN_NOW if _FROZEN_NOW is not None else datetime.now(EASTERN)
+
 
 def get_edition_week(dt: datetime | None = None) -> tuple[int, int]:
     """Returns (week_number, year) for Edition's Eastern-time-based weeks.
@@ -12,7 +26,7 @@ def get_edition_week(dt: datetime | None = None) -> tuple[int, int]:
     isocalendar() while keeping Mon 00:00–08:59 ET in the prior edition week.
     """
     if dt is None:
-        dt = datetime.now(EASTERN)
+        dt = _now()
     else:
         dt = dt.astimezone(EASTERN)
     shifted = dt - timedelta(hours=9)
@@ -33,12 +47,12 @@ def get_reveal_for_week(week_number: int, year: int) -> datetime:
 
 def is_revealed(week_number: int, year: int) -> bool:
     """Returns True if Monday 9 AM Eastern for the given week has passed."""
-    return datetime.now(EASTERN) >= get_reveal_for_week(week_number, year)
+    return _now() >= get_reveal_for_week(week_number, year)
 
 
 def get_next_reveal() -> datetime:
     """Returns the next Monday at 9:00 AM Eastern."""
-    now = datetime.now(EASTERN)
+    now = _now()
     days_until_monday = (7 - now.weekday()) % 7  # 0 if today is Monday
     candidate = (now + timedelta(days=days_until_monday)).replace(
         hour=9, minute=0, second=0, microsecond=0
@@ -50,7 +64,7 @@ def get_next_reveal() -> datetime:
 
 def time_until_reveal() -> timedelta:
     """Returns time remaining until the next Monday 9 AM Eastern reveal."""
-    return get_next_reveal() - datetime.now(EASTERN)
+    return get_next_reveal() - _now()
 
 
 def is_late_for_week(week_number: int, year: int) -> bool:

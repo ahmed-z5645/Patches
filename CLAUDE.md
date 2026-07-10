@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Edition is a personal documentation platform with "Bento" grid aesthetics. Users publish weekly posts containing rich artifact tiles. The core mechanic: you must publish a valid post (title + 100 words minimum) each week to unlock your followers' posts for that week. Posts are revealed every Monday at 9:00 AM Eastern.
+Patches is a personal documentation platform with "Bento" grid aesthetics. Users publish weekly posts containing rich artifact tiles. The core mechanic: you must publish a valid post (title + 100 words minimum) each week to unlock your followers' posts for that week. Posts are revealed every Monday at 9:00 AM Eastern.
 
 ## Stack
 
@@ -66,8 +66,8 @@ The editor and viewer are the same interface — zero abstraction between drafti
 ### Social Mechanics
 
 - **The Toll:** Publishing a valid post (title + ≥100 words) unlocks the current week's follower feed.
-- **Monday Reveal:** Each Monday at 9:00 AM Eastern (America/New_York), the week's posts become visible to unlocked users. The edition-week boundary is Mon 9 AM ET, so Mon 00:00–08:59 ET still counts as the prior week. Computed at query time, no cron job.
-- **Late Flag:** Posts published after the Monday 9:00 AM ET deadline get a permanent "Late" flag but still unlock the feed. Late posts stay accepted until the week fully closes (~one extra edition week of grace; see `is_week_closed`).
+- **Monday Reveal:** Each Monday at 9:00 AM Eastern (America/New_York), the week's posts become visible to unlocked users. The Patches-week boundary is Mon 9 AM ET, so Mon 00:00–08:59 ET still counts as the prior week. Computed at query time, no cron job.
+- **Late Flag:** Posts published after the Monday 9:00 AM ET deadline get a permanent "Late" flag but still unlock the feed. Late posts stay accepted until the week fully closes (~one extra Patches week of grace; see `is_week_closed`).
 - **Archive:** Past-week posts are visible to followers without needing a current-week post.
 
 ### Database Schema (Supabase/PostgreSQL)
