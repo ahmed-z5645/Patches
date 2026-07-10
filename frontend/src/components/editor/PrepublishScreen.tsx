@@ -445,23 +445,35 @@ export function PrepublishScreen({
     [topLevel]
   );
 
-  function findEmptyCell(): { colStart: number; rowStart: number } {
+  function isAreaOccupied(
+    colStart: number,
+    rowStart: number,
+    colSpan: number,
+    rowSpan: number
+  ): boolean {
+    return placed.some((b) => {
+      const l = b.grid_layout_mobile;
+      const overlapsCol =
+        colStart < l.colStart + l.colSpan && colStart + colSpan > l.colStart;
+      const overlapsRow =
+        rowStart < l.rowStart + l.rowSpan && rowStart + rowSpan > l.rowStart;
+      return overlapsCol && overlapsRow;
+    });
+  }
+
+  function findEmptyCell(colSpan: number, rowSpan: number): { colStart: number; rowStart: number } {
     // First-fit scan, columns left-to-right within each row.
-    for (let r = 1; r <= 100; r++) {
-      for (let c = 1; c <= 2; c++) {
-        const occupied = placed.some((b) => {
-          const l = b.grid_layout_mobile;
-          return (
-            c >= l.colStart &&
-            c < l.colStart + l.colSpan &&
-            r >= l.rowStart &&
-            r < l.rowStart + l.rowSpan
-          );
-        });
-        if (!occupied) return { colStart: c, rowStart: r };
+    for (let r = 1; r <= 200; r++) {
+      for (let c = 1; c <= 3 - colSpan; c++) {
+        if (!isAreaOccupied(c, r, colSpan, rowSpan)) return { colStart: c, rowStart: r };
       }
     }
-    return { colStart: 1, rowStart: 1 };
+    // Fall back to the row after the last placed block.
+    const maxRow = placed.reduce(
+      (m, b) => Math.max(m, b.grid_layout_mobile.rowStart + b.grid_layout_mobile.rowSpan),
+      1
+    );
+    return { colStart: 1, rowStart: maxRow };
   }
 
   function snapToCell(clientX: number, clientY: number): { colStart: number; rowStart: number } | null {
@@ -503,14 +515,32 @@ export function PrepublishScreen({
       if (startX != null && startY != null) {
         placement = snapToCell(startX + delta.x, startY + delta.y);
       }
-      if (!placement) placement = findEmptyCell();
 
-      const colSpan = Math.min(defaults.colSpan, 3 - placement.colStart);
+      const desiredColSpan = Math.max(1, Math.min(defaults.colSpan, 2));
+      const desiredRowSpan = Math.max(1, defaults.rowSpan);
+
+      // If the snap location collides with an existing tile (or the user
+      // dropped past the visible area), fall back to the next empty cell so
+      // tiles don't pile up on top of each other.
+      let finalCol = placement?.colStart ?? 1;
+      let finalRow = placement?.rowStart ?? 1;
+      let finalColSpan = Math.min(desiredColSpan, 3 - finalCol);
+      if (
+        !placement ||
+        finalColSpan < 1 ||
+        isAreaOccupied(finalCol, finalRow, Math.max(1, finalColSpan), desiredRowSpan)
+      ) {
+        const fallback = findEmptyCell(desiredColSpan, desiredRowSpan);
+        finalCol = fallback.colStart;
+        finalRow = fallback.rowStart;
+        finalColSpan = desiredColSpan;
+      }
+
       onMobileLayoutChange(blockId, {
-        colStart: placement.colStart,
-        rowStart: placement.rowStart,
-        colSpan: Math.max(1, colSpan),
-        rowSpan: defaults.rowSpan,
+        colStart: finalCol,
+        rowStart: finalRow,
+        colSpan: Math.max(1, finalColSpan),
+        rowSpan: desiredRowSpan,
       });
       return;
     }

@@ -5,7 +5,7 @@ import { TEST_USER_COOKIE, isTestMode } from "./test-mode";
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
-  // Test-mode short circuit: treat the edition_test_user cookie as a signed-in
+  // Test-mode short circuit: treat the Patches_test_user cookie as a signed-in
   // user so the protected/auth route logic below runs without contacting
   // Supabase Auth (which doesn't exist in test mode).
   let user: { id: string } | null = null;

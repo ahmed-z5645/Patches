@@ -1,5 +1,5 @@
 -- ============================================================
--- Edition Demo Seed Data
+-- Patches Demo Seed Data
 -- Creates fake users, profiles, posts, blocks, and follows
 -- ============================================================
 

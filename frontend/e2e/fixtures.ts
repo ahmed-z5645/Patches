@@ -1,10 +1,10 @@
 import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
 
 /**
- * Shared Playwright fixtures for Edition's e2e suite.
+ * Shared Playwright fixtures for Patches's e2e suite.
  *
  * The fixtures call into the backend's `/__test__` shim (mounted only when
- * EDITION_TEST_MODE=1) to seed users/posts/follows and to freeze the clock.
+ * Patches_TEST_MODE=1) to seed users/posts/follows and to freeze the clock.
  * See e2e/README.md for the wiring contract.
  */
 

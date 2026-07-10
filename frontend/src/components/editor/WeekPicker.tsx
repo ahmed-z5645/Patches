@@ -55,7 +55,7 @@ export function WeekPicker({ options }: { options: WeekOption[] }) {
           Choose a week
         </h1>
         <p className="text-sm text-text/60">
-          Pick which edition week this post is for.
+          Pick which Patches week this post is for.
         </p>
       </div>
 
