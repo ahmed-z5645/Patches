@@ -4,14 +4,13 @@ import userEvent from "@testing-library/user-event";
 import type { Block, Post } from "@/lib/types/blocks";
 import { MOBILE_HIDDEN_LAYOUT } from "@/lib/types/grid";
 
-// jsdom has no ResizeObserver — PrepublishScreen wires one up to measure the
-// preview grid. Stub it before importing the component.
+// jsdom has no ResizeObserver — PrepublishScreen wires one up to auto-size
+// markdown tiles. Stub it before importing the component.
 class MockResizeObserver {
   observe() {}
   unobserve() {}
   disconnect() {}
 }
-// @ts-expect-error injecting into the global for jsdom
 globalThis.ResizeObserver = MockResizeObserver;
 
 // EditorCanvas imports a Supabase client at module load. Keep it inert so
@@ -108,36 +107,107 @@ beforeEach(() => {
 });
 
 describe("PrepublishScreen", () => {
-  describe("mount reset", () => {
-    it("resets every top-level block to the hidden mobile layout on mount", () => {
+  describe("mount normalization", () => {
+    it("emits nothing when saved layouts are already packed", () => {
       const blocks = [
-        makeBlock({ id: "b1" }),
+        makeBlock({
+          id: "b1",
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
+        }),
         makeBlock({
           id: "b2",
           type: "image",
-          content: { url: "x" },
-          grid_layout_mobile: { colStart: 2, colSpan: 1, rowStart: 3, rowSpan: 2 },
+          content: { url: "x", alt: "" },
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 3, rowSpan: 2 },
         }),
       ];
       const { onMobileLayoutChange } = renderScreen({ blocks });
-      expect(onMobileLayoutChange).toHaveBeenCalledWith("b1", MOBILE_HIDDEN_LAYOUT);
-      expect(onMobileLayoutChange).toHaveBeenCalledWith("b2", MOBILE_HIDDEN_LAYOUT);
-      expect(onMobileLayoutChange).toHaveBeenCalledTimes(2);
+      expect(onMobileLayoutChange).not.toHaveBeenCalled();
     });
 
-    it("skips blocks already marked hidden", () => {
+    it("repacks overlapping tiles so half-width neighbors sit side by side", () => {
       const blocks = [
-        makeBlock({ id: "b1", grid_layout_mobile: MOBILE_HIDDEN_LAYOUT }),
-        makeBlock({ id: "b2" }),
+        makeBlock({
+          id: "b1",
+          type: "image",
+          content: { url: "x", alt: "" },
+          grid_layout_mobile: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+        }),
+        // Same cell as b1 — legacy data the old free-drop flow could produce.
+        makeBlock({
+          id: "b2",
+          type: "image",
+          content: { url: "y", alt: "" },
+          grid_layout_mobile: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+        }),
       ];
       const { onMobileLayoutChange } = renderScreen({ blocks });
+      expect(onMobileLayoutChange).toHaveBeenCalledWith("b2", {
+        colStart: 2,
+        colSpan: 1,
+        rowStart: 1,
+        rowSpan: 2,
+      });
       expect(onMobileLayoutChange).toHaveBeenCalledTimes(1);
-      expect(onMobileLayoutChange).toHaveBeenCalledWith("b2", MOBILE_HIDDEN_LAYOUT);
     });
 
-    it("skips child blocks (those with parent_block_id)", () => {
+    it("places every block in desktop order when nothing has a mobile placement yet", () => {
       const blocks = [
-        makeBlock({ id: "parent" }),
+        makeBlock({
+          id: "b1",
+          type: "image",
+          content: { url: "x", alt: "" },
+          grid_layout_desktop: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
+          grid_layout_mobile: MOBILE_HIDDEN_LAYOUT,
+        }),
+        makeBlock({
+          id: "b2",
+          type: "image",
+          content: { url: "y", alt: "" },
+          grid_layout_desktop: { colStart: 1, colSpan: 2, rowStart: 3, rowSpan: 2 },
+          grid_layout_mobile: MOBILE_HIDDEN_LAYOUT,
+        }),
+      ];
+      const { onMobileLayoutChange } = renderScreen({ blocks });
+      expect(onMobileLayoutChange).toHaveBeenCalledWith("b1", {
+        colStart: 1,
+        colSpan: 1,
+        rowStart: 1,
+        rowSpan: 2,
+      });
+      expect(onMobileLayoutChange).toHaveBeenCalledWith("b2", {
+        colStart: 2,
+        colSpan: 1,
+        rowStart: 1,
+        rowSpan: 2,
+      });
+    });
+
+    it("keeps previously hidden blocks hidden when at least one block is placed", () => {
+      const blocks = [
+        makeBlock({
+          id: "b1",
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
+        }),
+        makeBlock({
+          id: "b2",
+          type: "image",
+          content: { url: "x", alt: "" },
+          grid_layout_mobile: MOBILE_HIDDEN_LAYOUT,
+        }),
+      ];
+      const { onMobileLayoutChange } = renderScreen({ blocks });
+      expect(onMobileLayoutChange).not.toHaveBeenCalled();
+      expect(screen.getByText("Hidden on mobile (1)")).toBeInTheDocument();
+      expect(screen.getByTestId("renderer-b2")).toBeInTheDocument();
+    });
+
+    it("ignores child blocks (those with parent_block_id)", () => {
+      const blocks = [
+        makeBlock({
+          id: "parent",
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
+        }),
         makeBlock({
           id: "child",
           parent_block_id: "parent",
@@ -145,74 +215,149 @@ describe("PrepublishScreen", () => {
         }),
       ];
       const { onMobileLayoutChange } = renderScreen({ blocks });
-      expect(onMobileLayoutChange).toHaveBeenCalledTimes(1);
-      expect(onMobileLayoutChange).toHaveBeenCalledWith("parent", MOBILE_HIDDEN_LAYOUT);
+      expect(onMobileLayoutChange).not.toHaveBeenCalled();
+      // Child never appears as its own tile or tray card.
+      expect(screen.queryByTestId("renderer-child")).not.toBeInTheDocument();
+      expect(screen.getByText("Hidden on mobile (0)")).toBeInTheDocument();
     });
 
-    it("only resets once even if parent re-renders with new block array", () => {
-      const blocks = [makeBlock({ id: "b1" })];
-      const { rerender, onMobileLayoutChange } = renderScreen({ blocks });
-      expect(onMobileLayoutChange).toHaveBeenCalledTimes(1);
-
-      rerender(
-        <PrepublishScreen
-          post={makePost()}
-          blocks={[makeBlock({ id: "b1" }), makeBlock({ id: "b2" })]}
-          username="ahmed"
-          onPublish={vi.fn()}
-          onSaveDraft={vi.fn()}
-          onCancel={vi.fn()}
-          onMobileLayoutChange={onMobileLayoutChange}
-        />
-      );
-      // didResetRef guards a second reset pass
-      expect(onMobileLayoutChange).toHaveBeenCalledTimes(1);
+    it("shows the empty state when the post has no blocks", () => {
+      renderScreen({ blocks: [] });
+      expect(screen.getByText(/nothing to show on mobile yet/i)).toBeInTheDocument();
     });
   });
 
-  describe("palette vs. phone derivation", () => {
-    it("puts hidden-layout blocks in the palette", () => {
-      const blocks = [
-        makeBlock({ id: "b1", grid_layout_mobile: MOBILE_HIDDEN_LAYOUT }),
-        makeBlock({ id: "b2", type: "image", content: { url: "x" }, grid_layout_mobile: MOBILE_HIDDEN_LAYOUT }),
-      ];
-      renderScreen({ blocks });
-      expect(screen.getByText("Blocks (2)")).toBeInTheDocument();
-      expect(screen.getByTestId("renderer-b1")).toBeInTheDocument();
-      expect(screen.getByTestId("renderer-b2")).toBeInTheDocument();
-      // Phone empty-state message renders when nothing is placed
-      expect(screen.getByText(/drag blocks here/i)).toBeInTheDocument();
-    });
-
-    it("puts placed blocks in the phone and shows the empty-palette message when palette is empty", () => {
+  describe("hide and show", () => {
+    it("hides a placed block via its hide button", async () => {
+      const user = userEvent.setup();
       const blocks = [
         makeBlock({
           id: "b1",
-          grid_layout_mobile: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
         }),
       ];
-      renderScreen({ blocks });
-      expect(screen.getByText("Blocks (0)")).toBeInTheDocument();
-      expect(screen.getByText(/all blocks placed/i)).toBeInTheDocument();
-      // Tile renders inside the phone grid
-      expect(screen.getByTestId("renderer-b1")).toBeInTheDocument();
-      // No empty-phone hint when at least one tile is placed
-      expect(screen.queryByText(/drag blocks here/i)).not.toBeInTheDocument();
+      const { onMobileLayoutChange } = renderScreen({ blocks });
+      await user.click(screen.getByRole("button", { name: /hide on mobile/i }));
+      expect(onMobileLayoutChange).toHaveBeenCalledWith("b1", MOBILE_HIDDEN_LAYOUT);
+      // The tile moves to the hidden tray.
+      expect(screen.getByText("Hidden on mobile (1)")).toBeInTheDocument();
     });
 
-    it("does not show child blocks in the palette", () => {
+    it("re-adds a hidden block at the end of the layout", async () => {
+      const user = userEvent.setup();
       const blocks = [
-        makeBlock({ id: "parent", grid_layout_mobile: MOBILE_HIDDEN_LAYOUT }),
         makeBlock({
-          id: "child",
-          parent_block_id: "parent",
+          id: "b1",
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
+        }),
+        makeBlock({
+          id: "b2",
+          type: "image",
+          content: { url: "x", alt: "" },
           grid_layout_mobile: MOBILE_HIDDEN_LAYOUT,
         }),
       ];
+      const { onMobileLayoutChange } = renderScreen({ blocks });
+      await user.click(screen.getByRole("button", { name: /show on mobile/i }));
+      expect(onMobileLayoutChange).toHaveBeenCalledWith("b2", {
+        colStart: 1,
+        colSpan: 1,
+        rowStart: 3,
+        rowSpan: 2,
+      });
+      expect(screen.getByText("Hidden on mobile (0)")).toBeInTheDocument();
+    });
+  });
+
+  describe("width and height controls", () => {
+    it("toggles a tile to full width and repacks", async () => {
+      const user = userEvent.setup();
+      const blocks = [
+        makeBlock({
+          id: "b1",
+          type: "image",
+          content: { url: "x", alt: "" },
+          grid_layout_mobile: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
+        }),
+      ];
+      const { onMobileLayoutChange } = renderScreen({ blocks });
+      await user.click(screen.getByRole("button", { name: /make full width/i }));
+      expect(onMobileLayoutChange).toHaveBeenCalledWith("b1", {
+        colStart: 1,
+        colSpan: 2,
+        rowStart: 1,
+        rowSpan: 2,
+      });
+    });
+
+    it("steps tile height up", async () => {
+      const user = userEvent.setup();
+      const blocks = [
+        makeBlock({
+          id: "b1",
+          type: "image",
+          content: { url: "x", alt: "" },
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
+        }),
+      ];
+      const { onMobileLayoutChange } = renderScreen({ blocks });
+      await user.click(screen.getByRole("button", { name: /increase tile height/i }));
+      expect(onMobileLayoutChange).toHaveBeenCalledWith("b1", {
+        colStart: 1,
+        colSpan: 2,
+        rowStart: 1,
+        rowSpan: 3,
+      });
+    });
+
+    it("steps tile height down", async () => {
+      const user = userEvent.setup();
+      const blocks = [
+        makeBlock({
+          id: "b1",
+          type: "image",
+          content: { url: "x", alt: "" },
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 3 },
+        }),
+      ];
+      const { onMobileLayoutChange } = renderScreen({ blocks });
+      await user.click(screen.getByRole("button", { name: /decrease tile height/i }));
+      expect(onMobileLayoutChange).toHaveBeenCalledWith("b1", {
+        colStart: 1,
+        colSpan: 2,
+        rowStart: 1,
+        rowSpan: 2,
+      });
+    });
+
+    it("never shrinks a tile below one row", async () => {
+      const user = userEvent.setup();
+      const blocks = [
+        makeBlock({
+          id: "b1",
+          type: "image",
+          content: { url: "x", alt: "" },
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 1 },
+        }),
+      ];
+      const { onMobileLayoutChange } = renderScreen({ blocks });
+      await user.click(screen.getByRole("button", { name: /decrease tile height/i }));
+      expect(onMobileLayoutChange).not.toHaveBeenCalled();
+    });
+
+    it("hides the manual height controls on markdown tiles (auto-sized)", () => {
+      const blocks = [
+        makeBlock({
+          id: "b1",
+          grid_layout_mobile: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
+        }),
+      ];
       renderScreen({ blocks });
-      // Only the parent counts toward the palette
-      expect(screen.getByText("Blocks (1)")).toBeInTheDocument();
-      expect(screen.queryByTestId("renderer-child")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /increase tile height/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /decrease tile height/i })).not.toBeInTheDocument();
+      // Width and hide controls are still there.
+      expect(screen.getByRole("button", { name: /make half width/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /hide on mobile/i })).toBeInTheDocument();
     });
   });
 
@@ -408,24 +553,6 @@ describe("PrepublishScreen", () => {
       const { onCancel } = renderScreen();
       await user.click(screen.getByRole("button", { name: /back to editor/i }));
       await waitFor(() => expect(onCancel).toHaveBeenCalledOnce());
-    });
-  });
-
-  describe("remove from phone", () => {
-    it("sends the block back to the palette by writing MOBILE_HIDDEN_LAYOUT", async () => {
-      const user = userEvent.setup();
-      const blocks = [
-        makeBlock({
-          id: "placed-1",
-          grid_layout_mobile: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
-        }),
-      ];
-      const { onMobileLayoutChange } = renderScreen({ blocks });
-      // Mount-reset call fires first; ignore it, then click the × button.
-      onMobileLayoutChange.mockClear();
-      const removeBtn = screen.getByRole("button", { name: /remove from mobile layout/i });
-      await user.click(removeBtn);
-      expect(onMobileLayoutChange).toHaveBeenCalledWith("placed-1", MOBILE_HIDDEN_LAYOUT);
     });
   });
 });
