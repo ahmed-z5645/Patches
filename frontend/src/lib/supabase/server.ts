@@ -1,8 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { createTestServerClient, isTestMode } from "./test-mode";
 
 export async function createClient() {
   const cookieStore = await cookies();
+
+  if (isTestMode()) {
+    return createTestServerClient(cookieStore) as unknown as ReturnType<typeof createServerClient>;
+  }
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

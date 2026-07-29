@@ -29,7 +29,7 @@ import { countWords } from "@/lib/utils/wordcount";
 import { api } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 
-const DEFAULT_MOBILE_LAYOUTS: Record<string, MobileLayout> = {
+export const DEFAULT_MOBILE_LAYOUTS: Record<string, MobileLayout> = {
   markdown: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
   image: { colStart: 1, colSpan: 1, rowStart: 1, rowSpan: 2 },
   quote: { colStart: 1, colSpan: 2, rowStart: 1, rowSpan: 2 },
@@ -129,7 +129,7 @@ export function EditorCanvas({ post, initialBlocks }: EditorCanvasProps) {
   const [mobileGridMeta, setMobileGridMeta] = useState({ colWidth: 0, rowHeight: 0 });
 
   useEffect(() => {
-    createClient().auth.getUser().then(({ data }) => {
+    createClient().auth.getUser().then(({ data }: { data: { user: { user_metadata?: { username?: string } } | null } }) => {
       setUsername(data.user?.user_metadata?.username || "");
     });
   }, []);

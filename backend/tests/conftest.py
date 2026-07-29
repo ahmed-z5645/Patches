@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.main import app
 from app.deps import get_db, get_authenticated_user
+from app.auth import get_optional_user
 
 # Clear the lru_cache so our env vars above take effect
 get_settings.cache_clear()
@@ -195,6 +196,24 @@ def mock_db():
 def client(mock_db):
     app.dependency_overrides[get_db] = lambda: mock_db
     app.dependency_overrides[get_authenticated_user] = lambda: TEST_USER_ID
+    # Mirror authenticated_user → optional_user so endpoints that branch on
+    # caller identity (e.g. /api/posts/{id} for an owner-as-viewer) see the
+    # same TEST_USER_ID instead of falling through the anonymous path.
+    app.dependency_overrides[get_optional_user] = lambda: TEST_USER_ID
+    with TestClient(app, raise_server_exceptions=True) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def anon_client(mock_db):
+    """Like `client` but with no authenticated user — caller_id is None.
+
+    Use for endpoints that must serve anonymous visitors (public profile
+    pages, anonymous /api/posts/{id} requests against revealed posts).
+    """
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_optional_user] = lambda: None
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
     app.dependency_overrides.clear()

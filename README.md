@@ -5,8 +5,8 @@ A personal documentation platform with a "Bento" grid aesthetic. You publish one
 ## How it works
 
 - **The Toll** — publishing a valid post (title + ≥100 words) unlocks the current week's follower feed.
-- **Monday Reveal** — each **Monday at 9:00 AM Eastern (America/New_York)** the week's posts become visible to unlocked users. The edition-week boundary is Mon 9 AM ET, so Mon 00:00–08:59 ET still counts as the prior week. Computed at query time — no cron job.
-- **Late Flag** — posts published after the Monday 9 AM ET deadline get a permanent "Late" flag but still unlock the feed. Late posts stay accepted until the week fully closes (~one extra edition week of grace).
+- **Monday Reveal** — each **Monday at 9:00 AM Eastern (America/New_York)** the week's posts become visible to unlocked users. The Patches-week boundary is Mon 9 AM ET, so Mon 00:00–08:59 ET still counts as the prior week. Computed at query time — no cron job.
+- **Late Flag** — posts published after the Monday 9 AM ET deadline get a permanent "Late" flag but still unlock the feed. Late posts stay accepted until the week fully closes (~one extra Patches week of grace).
 - **Public profiles** (`/[username]`) — always reachable and bypass the Toll, but the Monday 9 AM ET reveal embargo still applies to non-owners.
 - **Archive** — past-week posts are visible to followers without needing a current-week post.
 

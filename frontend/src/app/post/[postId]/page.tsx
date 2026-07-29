@@ -9,6 +9,7 @@ import { keys } from "@/lib/query-keys";
 import type { Block, Post } from "@/lib/types/blocks";
 import { BentoGrid, BentoGridMobile } from "@/components/bento/BentoGrid";
 import { BentoTile, BentoTileMobile } from "@/components/bento/BentoTile";
+import { isMobileHidden } from "@/lib/types/grid";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { LateBadge } from "@/components/feed/LateBadge";
 import { EditorSplashScreen } from "@/components/editor/EditorSplashScreen";
@@ -95,8 +96,8 @@ export default function PostPage() {
       </div>
 
       {isMobile ? (
-        <BentoGridMobile blocks={topLevelBlocks}>
-          {topLevelBlocks.map((block) => (
+        <BentoGridMobile blocks={topLevelBlocks.filter((b) => !isMobileHidden(b.grid_layout_mobile))}>
+          {topLevelBlocks.filter((b) => !isMobileHidden(b.grid_layout_mobile)).map((block) => (
             <BentoTileMobile
               key={block.id}
               mobileLayout={block.grid_layout_mobile}
