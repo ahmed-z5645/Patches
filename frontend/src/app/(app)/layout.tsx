@@ -34,7 +34,7 @@ export default async function AppLayout({
           <div className="flex items-center gap-3">
             <div className="size-[35px] rounded-full" style={{ backgroundColor: avatarColor }} />
             <span className="text-[25px]">
-              <h1>@{user.user_metadata?.username || "edition"}</h1>
+              <h1>@{user.user_metadata?.username || "patches"}</h1>
             </span>
           </div>
           <CountdownPill />
