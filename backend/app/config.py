@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     vapid_public_key: str = ""
     vapid_private_key: str = ""
-    vapid_contact_email: str = "admin@edition.app"
+    vapid_contact_email: str = "ahmed.zafar5645@gmail.com"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
